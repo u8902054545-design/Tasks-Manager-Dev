@@ -698,12 +698,34 @@ push_to_main_stream(blocks_data)</pre>
 
         // --- NAVIGATION & STAGES ---
 
+        function resetTaskState() {
+            // Очистка полей ввода финального этапа
+            document.getElementById('final-block-1').value = '';
+            document.getElementById('final-block-2').value = '';
+            
+            // Сброс визуального отображения кода
+            const codeEntry = document.getElementById('final-code-entry');
+            codeEntry.textContent = 'Waiting for inputs...';
+            codeEntry.className = 'bg-purple-900/50 px-2 rounded italic text-white/50';
+
+            // Полный сброс кнопки "Завершить выполнение"
+            const finishBtn = document.getElementById('finish-task-btn');
+            finishBtn.disabled = false;
+            finishBtn.innerHTML = '<i data-lucide="check-circle" class="w-5 h-5"></i> Завершить выполнение';
+            finishBtn.classList.remove('!bg-red-500');
+
+            // Очистка поля токена (если использовалось)
+            document.getElementById('token-input').value = '';
+        }
+
         // 1. Open New Task from Pool
         function openAssembly(id) {
             activeTaskId = id;
             returnClickCount = 0;
             fabRestore.classList.remove('visible');
             
+            resetTaskState(); // Сброс данных предыдущей задачи
+
             document.getElementById('header-task-id').textContent = id;
             setupPageTransition();
 
@@ -716,17 +738,6 @@ push_to_main_stream(blocks_data)</pre>
             document.getElementById('interactive-area').style.pointerEvents = 'none';
             document.getElementById('action-area').classList.add('hidden');
             
-            // --- FIX: Clear all inputs from potential previous tasks ---
-            document.getElementById('token-input').value = '';
-            document.getElementById('final-block-1').value = '';
-            document.getElementById('final-block-2').value = '';
-            document.getElementById('table-body').innerHTML = '';
-            
-            const finalEntry = document.getElementById('final-code-entry');
-            finalEntry.textContent = 'Waiting for inputs...';
-            finalEntry.className = 'bg-purple-900/50 px-2 rounded italic text-white/50';
-            // -----------------------------------------------------------
-            
             document.getElementById('btn-start-assembly').disabled = false;
             document.getElementById('btn-start-assembly').innerHTML = '<i data-lucide="play" class="w-5 h-5 fill-current"></i> Начать выполнение';
             
@@ -738,6 +749,9 @@ push_to_main_stream(blocks_data)</pre>
             activeTaskId = id;
             returnClickCount = 0;
             fabRestore.classList.remove('visible');
+            
+            resetTaskState(); // Сброс данных, чтобы поля были чистыми при переключении
+
             document.getElementById('header-task-id').textContent = id;
             setupPageTransition();
 
@@ -945,7 +959,10 @@ push_to_main_stream(blocks_data)</pre>
                 console.error("Completion error:", err);
                 btn.disabled = false;
                 btn.innerHTML = `<i data-lucide="alert-circle" class="w-5 h-5"></i> Ошибка.`;
-                setTimeout(() => { btn.innerHTML = originalContent; }, 3000);
+                setTimeout(() => { 
+                    btn.innerHTML = '<i data-lucide="check-circle" class="w-5 h-5"></i> Завершить выполнение'; 
+                    btn.disabled = false;
+                }, 3000);
             }
         }
 
@@ -972,4 +989,4 @@ push_to_main_stream(blocks_data)</pre>
         };
     </script>
 </body>
-</html>
+    </html>

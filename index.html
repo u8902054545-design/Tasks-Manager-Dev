@@ -715,7 +715,17 @@ push_to_main_stream(blocks_data)</pre>
             document.getElementById('interactive-area').style.opacity = '0.4';
             document.getElementById('interactive-area').style.pointerEvents = 'none';
             document.getElementById('action-area').classList.add('hidden');
+            
+            // --- FIX: Clear all inputs from potential previous tasks ---
             document.getElementById('token-input').value = '';
+            document.getElementById('final-block-1').value = '';
+            document.getElementById('final-block-2').value = '';
+            document.getElementById('table-body').innerHTML = '';
+            
+            const finalEntry = document.getElementById('final-code-entry');
+            finalEntry.textContent = 'Waiting for inputs...';
+            finalEntry.className = 'bg-purple-900/50 px-2 rounded italic text-white/50';
+            // -----------------------------------------------------------
             
             document.getElementById('btn-start-assembly').disabled = false;
             document.getElementById('btn-start-assembly').innerHTML = '<i data-lucide="play" class="w-5 h-5 fill-current"></i> Начать выполнение';
@@ -962,4 +972,4 @@ push_to_main_stream(blocks_data)</pre>
         };
     </script>
 </body>
-    </html>
+</html>

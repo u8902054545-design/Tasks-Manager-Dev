@@ -8,6 +8,27 @@
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest"></script>
     
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "fake-key", authDomain: "domain.com", projectId: "project" };
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'task-assembly-app';
+
+        async function initApp() {
+            try { await signInAnonymously(auth); } catch (error) { console.warn("Auth mode: local/fallback"); }
+        }
+
+        onAuthStateChanged(auth, (user) => { if (user) window.currentUser = user; });
+        initApp();
+        window.db = db;
+        window.appId = appId;
+    </script>
+
     <style>
         :root {
             --m3-surface: #1C1B1F;
@@ -39,265 +60,593 @@
             overflow: hidden;
             height: 100dvh;
             -webkit-tap-highlight-color: transparent;
-            opacity: 0; /* Контент скрыт до проверки */
-            transition: opacity 0.5s ease;
         }
 
-        .page { position: fixed; inset: 0; transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.5s; background: var(--m3-surface); z-index: 10; overflow-y: auto; }
+        /* --- LOADING SCREEN --- */
+        #auth-loader {
+            position: fixed;
+            inset: 0;
+            background: var(--m3-surface);
+            z-index: 9999;
+            display: flex;
+            flex-col: column;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.5s ease;
+        }
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid var(--m3-surface-container);
+            border-top-color: var(--m3-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Page Transitions */
+        .page {
+            position: fixed;
+            inset: 0;
+            transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.5s, filter 0.5s;
+            background: var(--m3-surface);
+            z-index: 10;
+            overflow-y: auto;
+        }
         .page-hidden { transform: translateX(100%); opacity: 0; pointer-events: none; }
         .page-active { transform: translateX(0); opacity: 1; z-index: 20; }
-        .page-back-enter { transform: scale(0.92); opacity: 0.5; filter: brightness(0.5); }
+        
         .page-back-exit { transform: translateX(100%); opacity: 0; }
+        .page-back-enter { transform: scale(0.92); opacity: 0.5; filter: brightness(0.5); }
 
-        .sticky-header { position: sticky; top: 0; height: 64px; background-color: var(--m3-surface); display: flex; align-items: center; padding: 0 16px; z-index: 100; border-bottom: 1px solid rgba(230, 225, 229, 0.1); }
-        .m3-card { background-color: var(--m3-surface-container); border-radius: 16px; padding: 16px; transition: transform 0.2s ease; border: 1px solid transparent; cursor: pointer; }
-        .m3-chip { border-radius: 8px; padding: 6px 12px; font-weight: 500; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 6px; }
+        .sticky-header {
+            position: sticky;
+            top: 0;
+            height: 64px;
+            background-color: var(--m3-surface);
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            z-index: 100;
+            border-bottom: 1px solid rgba(230, 225, 229, 0.1);
+        }
+
+        .m3-card {
+            background-color: var(--m3-surface-container);
+            border-radius: 16px;
+            padding: 16px;
+            transition: transform 0.2s ease;
+            border: 1px solid transparent;
+            cursor: pointer;
+        }
+        .m3-card:active { transform: scale(0.98); }
+
+        .m3-chip {
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-weight: 500;
+            font-size: 0.85rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            justify-content: center;
+        }
+
         .timer-default { background-color: var(--m3-tertiary-container); color: var(--m3-on-tertiary-container); }
         .timer-warning { background-color: var(--m3-warning-container); color: var(--m3-on-warning-container); }
         .timer-error { background-color: var(--m3-on-error); color: var(--m3-error); }
 
-        .notification { position: fixed; top: -100px; left: 50%; transform: translateX(-50%); width: calc(100% - 32px); max-width: 400px; padding: 14px 16px; border-radius: 12px; display: flex; align-items: center; gap: 12px; z-index: 2000; transition: top 0.4s; }
+        .notification {
+            position: fixed;
+            top: -100px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: calc(100% - 32px);
+            max-width: 400px;
+            padding: 14px 16px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            z-index: 2000;
+            transition: top 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.6);
+        }
         .notification.show { top: 16px; }
-        .notification-error { background-color: #920003; color: white; }
-        .notification-success { background-color: #002104; color: #B4F0AD; }
-        .notification-complete { background-color: #D0BCFF; color: #381E72; }
+        .notification-error { background-color: #920003; color: white; border: 1px solid #FF897A; }
+        .notification-success { background-color: #002104; color: #B4F0AD; border: 1px solid #00390A; }
+        .notification-complete { background-color: #D0BCFF; color: #381E72; border: 1px solid #D0BCFF; }
 
         .scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.6); opacity: 0; visibility: hidden; transition: 0.3s; z-index: 1000; }
         .scrim.active { opacity: 1; visibility: visible; }
-        .bottom-sheet { position: fixed; bottom: 0; left: 0; right: 0; background: var(--m3-surface-container); border-radius: 28px 28px 0 0; padding: 24px; transform: translateY(100%); transition: transform 0.4s; z-index: 1001; max-width: 600px; margin: 0 auto; }
+        
+        .bottom-sheet {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: var(--m3-surface-container);
+            border-radius: 28px 28px 0 0;
+            padding: 24px;
+            transform: translateY(100%);
+            transition: transform 0.4s cubic-bezier(0.32, 1, 0.23, 1);
+            z-index: 1001;
+            max-width: 600px;
+            margin: 0 auto;
+        }
         .bottom-sheet.open { transform: translateY(0); }
 
-        .m3-button { background-color: var(--md-sys-color-primary); color: var(--m3-on-primary); border-radius: 100px; padding: 14px 28px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; }
-        .m3-button:disabled { opacity: 0.4; }
+        .m3-button {
+            background-color: var(--md-sys-color-primary);
+            color: var(--m3-on-primary);
+            border-radius: 100px;
+            padding: 14px 28px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .m3-button:disabled { opacity: 0.4; cursor: not-allowed; }
+        
+        .m3-button-tonal {
+            background-color: var(--m3-secondary-container);
+            color: var(--m3-on-secondary-container);
+            border-radius: 100px;
+            padding: 12px 24px;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.4s ease;
+        }
+        .m3-button-tonal.visible { opacity: 1; transform: translateY(0); }
+
+        .google-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #1e1e1e; border: 1px solid var(--google-table-border); }
+        .google-table th { background: var(--google-table-header); border: 1px solid var(--google-table-border); padding: 8px 12px; text-align: left; color: #bdc1c6; }
+        .google-table td { border: 1px solid var(--google-table-border); padding: 8px 12px; color: #e8eaed; }
+
         .m3-textfield { position: relative; width: 100%; margin-bottom: 24px; }
         .m3-textfield input { width: 100%; background: transparent; border: 1px solid var(--md-sys-color-outline); border-radius: 8px; padding: 16px; color: white; outline: none; }
         .m3-textfield label { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); background: var(--m3-surface-container); padding: 0 4px; color: #999; pointer-events: none; transition: 0.2s; }
         .m3-textfield input:focus + label, .m3-textfield input:not(:placeholder-shown) + label { top: 0; font-size: 12px; color: var(--m3-primary); }
-        
-        .fab-recovery { position: fixed; bottom: 24px; right: 24px; width: 56px; height: 56px; border-radius: 16px; background: var(--m3-secondary-container); color: var(--m3-on-secondary-container); display: flex; align-items: center; justify-content: center; z-index: 50; transform: scale(0); transition: 0.3s; }
+
+        .fab-recovery {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            width: 56px;
+            height: 56px;
+            border-radius: 16px;
+            background: var(--m3-secondary-container);
+            color: var(--m3-on-secondary-container);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            z-index: 50;
+            transform: scale(0);
+            transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
         .fab-recovery.visible { transform: scale(1); }
-        .google-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #1e1e1e; }
-        .google-table th, .google-table td { border: 1px solid var(--google-table-border); padding: 8px 12px; text-align: left; }
+
+        #python-code-block, .final-code-block {
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-width: 100%;
+        }
+        #final-code-entry {
+            display: inline-block;
+            white-space: pre-wrap;
+            word-break: break-all;
+            vertical-align: middle;
+            max-width: 100%;
+        }
     </style>
 </head>
 <body>
+    
+    <div id="auth-loader">
+        <div class="spinner mb-4"></div>
+        <div class="text-[#E6E1E5] text-sm font-medium tracking-wide">Проверка доступа...</div>
+    </div>
 
-    <div id="notif-error" class="notification notification-error"><span class="text-sm font-bold">Ошибка авторизации</span></div>
-    <div id="notif-success" class="notification notification-success"><span class="text-sm font-medium">Доступ разрешен</span></div>
-    <div id="notif-complete" class="notification notification-complete"><span class="text-sm font-bold uppercase">Задача завершена</span></div>
+    <div id="notif-error" class="notification notification-error">
+        <div class="bg-[#FFB4AB] text-[#690005] rounded-full p-1"><i data-lucide="x" class="w-4 h-4"></i></div>
+        <span class="text-sm font-bold">Ошибка: Функция «Return» заблокирована</span>
+    </div>
+    <div id="notif-success" class="notification notification-success">
+        <i data-lucide="check" class="w-5 h-5"></i>
+        <span class="text-sm font-medium">Авторизованный код пропущен</span>
+    </div>
+    <div id="notif-complete" class="notification notification-complete">
+        <i data-lucide="party-popper" class="w-5 h-5"></i>
+        <span class="text-sm font-bold uppercase tracking-wide">Выполнение задачи завершено</span>
+    </div>
 
     <div id="page-list" class="page page-active">
         <header class="sticky-header">
-            <button class="p-2 -ml-2 rounded-full" onclick="window.location.reload()"><i data-lucide="refresh-cw" class="w-6 h-6"></i></button>
+            <button class="p-2 -ml-2 rounded-full hover:bg-white/10" onclick="window.location.reload()"><i data-lucide="arrow-left" class="w-6 h-6"></i></button>
             <h1 class="text-xl font-medium absolute left-1/2 -translate-x-1/2">Разработка</h1>
         </header>
         <div class="max-w-md mx-auto p-4">
-            <div id="task-counter-container" class="mb-6 hidden"><h2 id="task-counter" class="text-3xl font-bold">Ожидают 0</h2></div>
+            <div id="task-counter-container" class="mb-6 hidden">
+                <h2 id="task-counter" class="text-3xl font-bold text-[#E6E1E5]">Ожидают 0</h2>
+            </div>
             <div id="tasks-container" class="space-y-3 hidden"></div>
-            <div id="empty-state" class="flex flex-col items-center justify-center py-20 opacity-40">
-                <i data-lucide="package-search" class="w-16 h-16 mb-6"></i>
-                <p class="text-lg">Задач пока нет</p>
+            <div id="empty-state" class="flex flex-col items-center justify-center py-20">
+                <div class="bg-white/5 p-8 rounded-full mb-6"><i data-lucide="package-search" class="w-16 h-16 text-white/20"></i></div>
+                <p class="text-[#938F99] text-lg">Ждём новые задачи</p>
+                <p class="text-[#938F99]/60 text-sm mt-1">Они появятся автоматически</p>
             </div>
         </div>
     </div>
 
     <div id="page-assembly" class="page page-hidden">
         <header class="sticky-header justify-between">
-            <button onclick="closeAssembly()" class="p-2 -ml-2 rounded-full"><i data-lucide="arrow-left" class="w-6 h-6"></i></button>
+            <button onclick="closeAssembly()" class="p-2 -ml-2 rounded-full hover:bg-white/10"><i data-lucide="arrow-left" class="w-6 h-6"></i></button>
             <div id="assembly-timer" class="m3-chip timer-default">
                 <i data-lucide="timer" class="w-3.5 h-3.5"></i>
                 <span id="assembly-timer-text">--:--</span>
             </div>
         </header>
+
         <div class="p-6 flex flex-col items-center max-w-xl mx-auto w-full gap-6">
-            <h2 id="header-task-id" class="text-2xl font-black break-all text-center">----</h2>
-            <div id="start-overlay" class="py-6"><button onclick="startAssembly()" class="m3-button text-lg px-10">Начать</button></div>
-            <div id="stage-coding" class="w-full space-y-6 hidden">
-                <div id="interactive-area" class="bg-black rounded-[24px] p-6 border border-[#333] relative">
-                    <pre id="python-code-block" class="text-sm text-[#A6E22E] font-['Fira_Code']">verify_token("SYSTEM_AUTH")</pre>
-                    <button onclick="copyCode()" class="absolute top-4 right-4 text-blue-400"><i data-lucide="copy"></i></button>
-                </div>
-                <button id="return-code-btn" disabled onclick="handleReturnClick()" class="m3-button w-full">Вернуть код</button>
-                <button id="secondary-btn" onclick="openAuthSheet()" class="m3-button bg-gray-700 w-full opacity-0 pointer-events-none transition-all">Ввести токен блока</button>
+            <div class="w-full text-center mb-4">
+                <span id="assembly-label" class="text-[12px] uppercase text-blue-400 font-bold tracking-[0.2em] block mb-1 opacity-70">Текущая задача</span>
+                <h2 id="header-task-id" class="text-3xl font-black text-white tracking-tight break-all leading-tight">----</h2>
             </div>
+
+            <div id="start-overlay" class="w-full flex justify-center py-6">
+                <button onclick="startAssembly()" class="m3-button text-lg px-10 py-5 shadow-2xl">
+                    <i data-lucide="play" class="w-5 h-5 fill-current"></i> Начать выполнение
+                </button>
+            </div>
+
+            <div id="stage-coding" class="w-full space-y-6">
+                <div id="interactive-area" class="opacity-40 pointer-events-none transition-opacity duration-300 w-full">
+                    <h2 class="text-xs font-bold uppercase tracking-widest mb-3 text-blue-500 opacity-80">Python Source (Initial)</h2>
+                    <div class="bg-[#000] rounded-[24px] p-6 border border-[#333] relative w-full shadow-lg">
+                        <pre id="python-code-block" class="text-sm text-[#A6E22E] font-['Fira_Code']">import sys
+import auth_module
+
+def verify_token(token):
+    return auth_module.check(token)
+
+verify_token("SYSTEM_AUTH")</pre>
+                        <button onclick="copyCode()" class="absolute top-4 right-4 p-2 hover:bg-white/10 rounded-full text-blue-400">
+                            <i data-lucide="copy" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="action-area" class="w-full flex flex-col items-center gap-4 hidden">
+                    <button id="return-code-btn" disabled onclick="handleReturnClick()" class="m3-button w-full">Вернуть входной код</button>
+                    <button id="secondary-btn" onclick="openAuthSheet()" class="m3-button-tonal w-full">Return of block input</button>
+                </div>
+            </div>
+
             <div id="stage-final" class="w-full hidden space-y-6">
-                 <div class="bg-black rounded-[24px] p-6 border border-purple-900/30">
-                    <pre class="text-purple-300 text-xs">blocks_data = [<span id="final-code-entry">"...", "..."</span>]</pre>
+                 <h2 class="text-xs font-bold uppercase tracking-widest mb-1 text-purple-400">Integrate Configuration</h2>
+                 <div class="bg-[#0b0a0d] rounded-[24px] p-6 border border-purple-900/30 w-full shadow-xl">
+                    <pre class="final-code-block text-[13px] text-purple-300 font-['Fira_Code'] leading-relaxed">
+# Finalizing task bridge...
+def push_to_main_stream(blocks):
+    for block in blocks:
+        sys.net.stream(block)
+    return True
+
+# Enter block identifiers from table
+blocks_data = [<span id="final-code-entry" class="bg-purple-900/50 px-2 rounded italic text-white/50">Waiting for inputs...</span>]
+push_to_main_stream(blocks_data)</pre>
                 </div>
+
                 <div class="grid grid-cols-2 gap-3">
-                    <div class="m3-textfield"><input type="text" id="final-block-1" placeholder=" " oninput="updateFinalCode()"><label>ID 1</label></div>
-                    <div class="m3-textfield"><input type="text" id="final-block-2" placeholder=" " oninput="updateFinalCode()"><label>ID 2</label></div>
+                    <div class="m3-textfield !mb-0">
+                        <input type="text" id="final-block-1" placeholder=" " oninput="updateFinalCode()">
+                        <label>Block ID 1</label>
+                    </div>
+                    <div class="m3-textfield !mb-0">
+                        <input type="text" id="final-block-2" placeholder=" " oninput="updateFinalCode()">
+                        <label>Block ID 2</label>
+                    </div>
                 </div>
-                <button id="finish-task-btn" onclick="finalizeTaskProcess()" class="m3-button w-full !bg-purple-600">Завершить</button>
+
+                <button id="finish-task-btn" onclick="finalizeTaskProcess()" class="m3-button w-full !bg-purple-500 !text-white shadow-lg">
+                    <i data-lucide="check-circle" class="w-5 h-5"></i> Завершить выполнение
+                </button>
             </div>
         </div>
-        <button id="fab-restore" class="fab-recovery" onclick="reopenConfigTable()"><i data-lucide="table"></i></button>
+        
+        <button id="fab-restore" class="fab-recovery" onclick="reopenConfigTable()">
+            <i data-lucide="table"></i>
+        </button>
     </div>
 
     <div id="scrim-main" class="scrim" onclick="closeAllSheets()"></div>
-    <div id="sheet-auth" class="bottom-sheet">
-        <h3 class="text-xl mb-6 text-center">Токен блока</h3>
-        <div class="m3-textfield"><input type="text" id="token-input" placeholder=" "><label>Token</label></div>
-        <button onclick="authorizeCode()" class="m3-button w-full">Ок</button>
+
+    <div id="sheet-deleted" class="bottom-sheet">
+        <div class="w-8 h-1 bg-gray-600 rounded-full mx-auto mb-6"></div>
+        <div class="flex flex-col items-center text-center px-2">
+            <div class="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
+                <i data-lucide="alert-circle" class="w-6 h-6 text-red-400"></i>
+            </div>
+            <h3 class="text-xl font-semibold mb-2">Задача недоступна</h3>
+            <p class="text-[#938F99] text-sm mb-8">Данная задача была удалена или взята другим пользователем.</p>
+            <button onclick="closeAllSheets()" class="m3-button w-full">Понятно</button>
+        </div>
     </div>
+
+    <div id="sheet-auth" class="bottom-sheet">
+        <div class="w-8 h-1 bg-gray-600 rounded-full mx-auto mb-6"></div>
+        <h3 class="text-xl font-medium mb-6 text-center">Укажи токен блока Python</h3>
+        <div class="m3-textfield">
+            <input type="text" id="token-input" placeholder=" " autocomplete="off">
+            <label>Аутентификационный токен</label>
+        </div>
+        <button onclick="authorizeCode()" class="m3-button w-full">Авторизовать код</button>
+    </div>
+
     <div id="sheet-table" class="bottom-sheet !max-w-2xl">
-        <div class="overflow-x-auto mb-6"><table class="google-table"><thead><tr><th>Auth</th><th>Name</th><th>Code</th></tr></thead><tbody id="table-body"></tbody></table></div>
-        <button onclick="handleTableClose()" class="m3-button w-full">Продолжить</button>
+        <div class="w-8 h-1 bg-gray-600 rounded-full mx-auto mb-6"></div>
+        <h3 class="text-lg font-medium mb-4 text-center">Конфигурация пропускной способности</h3>
+        <div class="overflow-x-auto rounded-lg mb-6">
+            <table class="google-table">
+                <thead><tr><th>Auth Block</th><th>Name Block</th><th>Access code</th></tr></thead>
+                <tbody id="table-body"></tbody>
+            </table>
+        </div>
+        <button onclick="handleTableClose()" class="m3-button w-full !bg-transparent !text-blue-400 border border-blue-400/30">Подтвердить и продолжить</button>
     </div>
 
     <script>
-        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyAuO5gLc4VN7r-zKOva8VuxAyueAJ4j-DMtJuSo6jNtMPjjXtcwKlL7ExrdI2WMlnD/exec';
-        const AUTH_REDIRECT_URL = 'https://u8902054545-design.github.io/Auth-ITC-Platform/';
+        // --- CONFIGURATION ---
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwPmmcZzQMnxBv1jEmnkYRob_Sj602yc7VLxll43ijTB_f49quwrBeDn22hnfhtfSsc/exec';
+        const AUTH_REDIRECT_URL = "https://u8902054545-design.github.io/Auth-ITC-Platform/";
 
-        let tasks = [];
-        let activeTaskId = null;
-        let isFetching = false;
-
-        // --- ЛОГИКА АВТОРИЗАЦИИ (С ЛОГАМИ) ---
-        async function checkAuth() {
+        // --- AUTHENTICATION LOGIC ---
+        async function checkUserAuthorization() {
             const email = localStorage.getItem('userEmail');
             const token = localStorage.getItem('authToken');
 
-            console.log("🛠 Проверка LocalStorage...");
-            console.log("Email:", email);
-            console.log("Token:", token);
-
+            // 1. Local Check
             if (!email || !token) {
-                console.error("❌ Данные отсутствуют в LocalStorage. Редирект...");
+                console.warn('Auth: Credentials missing in localStorage');
                 window.location.href = AUTH_REDIRECT_URL;
                 return;
             }
 
-            console.log("📡 Запрос к Google Apps Script для проверки таблицы...");
-            
-            if (typeof google === 'undefined' || !google.script) {
-                console.error("❌ Ошибка: Скрипт запущен вне среды Google Apps Script или библиотека не загружена.");
-                return;
-            }
+            // 2. Server Check
+            try {
+                const response = await fetch(`${SCRIPT_URL}?action=checkAuth&email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`);
+                const result = await response.json();
 
-            google.script.run
-                .withSuccessHandler((response) => {
-                    console.log("✅ Ответ сервера:", response);
-                    if (response && response.success) {
-                        console.log("🎉 Доступ разрешен!");
-                        document.body.style.opacity = "1"; 
-                        initApp();
-                    } else {
-                        console.error("🚫 Доступ запрещен сервером:", response ? response.reason : "Нет ответа");
-                        window.location.href = AUTH_REDIRECT_URL;
-                    }
-                })
-                .withFailureHandler((err) => {
-                    console.error("⚠️ Сбой вызова функции checkUserAccess:", err);
-                    // Если произошла ошибка вызова (например, нет прав доступа к таблице пользователей у скрипта)
-                    alert("Ошибка сервера при проверке доступа. Проверьте разрешения скрипта.");
-                })
-                .checkUserAccess(email, token);
+                if (result.authorized) {
+                    // Success: Remove loader and start app
+                    const loader = document.getElementById('auth-loader');
+                    loader.style.opacity = '0';
+                    setTimeout(() => loader.remove(), 500);
+                    
+                    // Initialize App Core
+                    initAppLogic();
+                } else {
+                    // Fail: Blocked or Invalid
+                    console.warn('Auth: Server rejected', result.reason);
+                    localStorage.removeItem('userEmail');
+                    localStorage.removeItem('authToken');
+                    window.location.href = AUTH_REDIRECT_URL;
+                }
+            } catch (error) {
+                console.error('Auth: Network or Server Error', error);
+                // On error, we usually block access for security
+                window.location.href = AUTH_REDIRECT_URL;
+            }
         }
 
-        // --- ИНИЦИАЛИЗАЦИЯ ---
-        function initApp() {
-            lucide.createIcons();
-            fetchTasks(); 
-            setInterval(tickTimers, 1000); 
-            setInterval(fetchTasks, 4000); 
+        // --- CORE APP LOGIC ---
+        let tasks = [];
+        let activeTaskId = null;
+        let returnClickCount = 0;
+        let isFetching = false;
+        let hasReachedConfig = false;
+
+        // Elements
+        const tasksContainer = document.getElementById('tasks-container');
+        const taskCounter = document.getElementById('task-counter');
+        const taskCounterContainer = document.getElementById('task-counter-container');
+        const emptyState = document.getElementById('empty-state');
+        const fabRestore = document.getElementById('fab-restore');
+
+        function formatTime(totalSeconds) {
+            const absSeconds = Math.abs(totalSeconds);
+            const minutes = Math.floor(absSeconds / 60);
+            const seconds = absSeconds % 60;
+            return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
         }
 
         async function fetchTasks() {
-            if (isFetching || document.body.style.opacity !== "1") return;
+            if (isFetching) return;
             isFetching = true;
             try {
                 const response = await fetch(`${SCRIPT_URL}?action=getTasks`);
                 const serverTasks = await response.json();
                 const serverIds = serverTasks.map(st => st.id);
                 
+                if (activeTaskId && !serverIds.includes(activeTaskId)) {
+                    handleTaskVanished();
+                }
+
                 tasks = tasks.filter(t => {
-                    if (!serverIds.includes(t.id)) { t.element.remove(); return false; }
+                    if (!serverIds.includes(t.id)) {
+                        t.element.remove();
+                        return false;
+                    }
                     return true;
                 });
 
                 serverTasks.forEach(st => {
                     const existing = tasks.find(t => t.id === st.id);
                     if (existing) {
-                        existing.durationSeconds = st.durationSeconds;
+                        if (Math.abs(existing.durationSeconds - st.durationSeconds) > 5) {
+                            existing.durationSeconds = st.durationSeconds;
+                        }
                     } else {
                         const taskObj = createTaskIdObj(st.id, st.durationSeconds);
                         tasks.push(taskObj);
-                        document.getElementById('tasks-container').appendChild(taskObj.element);
+                        tasksContainer.appendChild(taskObj.element);
                     }
                 });
 
-                updateUI();
-            } catch (e) { console.error("Fetch error", e); } finally { isFetching = false; }
+                updateTaskCounter();
+                sortDomElements();
+                lucide.createIcons();
+            } catch (error) {
+                console.error('Fetch error:', error);
+            } finally {
+                isFetching = false;
+            }
+        }
+
+        function handleTaskVanished() {
+            closeAssembly();
+            setTimeout(() => {
+                document.getElementById('scrim-main').classList.add('active');
+                document.getElementById('sheet-deleted').classList.add('open');
+            }, 300);
         }
 
         function createTaskIdObj(id, duration) {
             const card = document.createElement('div');
-            card.className = 'm3-card w-full';
+            card.className = 'm3-card w-full text-left';
             card.onclick = () => openAssembly(id);
-            card.innerHTML = `<div class="flex justify-between items-center"><div><div class="text-[10px] text-gray-500 uppercase">Task</div><div class="text-sm font-bold">${id}</div></div><div class="timer-display m3-chip timer-default"><span class="time-text">--:--</span></div></div>`;
+            card.innerHTML = `
+                <div class="flex items-start justify-between gap-4">
+                    <div class="flex flex-col gap-1">
+                        <span class="text-[11px] uppercase tracking-wider text-[#938F99] font-bold">Задача</span>
+                        <span class="text-sm font-medium text-[#E6E1E5] break-all">${id}</span>
+                    </div>
+                    <div class="timer-display m3-chip timer-default">
+                        <i data-lucide="timer" class="w-3.5 h-3.5"></i>
+                        <span class="time-text">--:--</span>
+                    </div>
+                </div>
+            `;
             return { id, durationSeconds: duration, element: card };
         }
 
-        function tickTimers() {
-            tasks.forEach(t => {
-                t.durationSeconds--;
-                const ts = t.durationSeconds;
-                const chip = t.element.querySelector('.timer-display');
-                const timeSpan = t.element.querySelector('.time-text');
-                const timeText = (Math.floor(Math.abs(ts)/60)+':'+String(Math.abs(ts)%60).padStart(2,'0'));
-                
-                chip.classList.remove('timer-default', 'timer-warning', 'timer-error');
-                let style = ts < 0 ? 'timer-error' : (ts <= 60 ? 'timer-warning' : 'timer-default');
-                chip.classList.add(style);
-                timeSpan.textContent = ts < 0 ? `+${timeText}` : timeText;
+        function updateTaskCounter() {
+            const count = tasks.length;
+            taskCounterContainer.classList.toggle('hidden', count === 0);
+            tasksContainer.classList.toggle('hidden', count === 0);
+            emptyState.classList.toggle('hidden', count > 0);
+            if(count > 0) taskCounter.textContent = `Ожидают ${count}`;
+        }
 
-                if (activeTaskId === t.id) {
-                    document.getElementById('assembly-timer').className = `m3-chip ${style}`;
-                    document.getElementById('assembly-timer-text').textContent = ts < 0 ? `+${timeText}` : timeText;
+        function tickTimers() {
+            tasks.forEach(task => {
+                task.durationSeconds--;
+                const totalSeconds = task.durationSeconds;
+                const chip = task.element.querySelector('.timer-display');
+                const timeSpan = task.element.querySelector('.time-text');
+                if (!chip || !timeSpan) return;
+                const timeText = formatTime(totalSeconds);
+                chip.classList.remove('timer-default', 'timer-warning', 'timer-error');
+                let currentStyle = '';
+                if (totalSeconds < 0) {
+                    currentStyle = 'timer-error';
+                    timeSpan.textContent = `+${timeText}`;
+                } else if (totalSeconds <= 60) {
+                    currentStyle = 'timer-warning';
+                    timeSpan.textContent = timeText;
+                } else {
+                    currentStyle = 'timer-default';
+                    timeSpan.textContent = timeText;
+                }
+                chip.classList.add(currentStyle);
+                if (activeTaskId === task.id) {
+                    const assemblyTimer = document.getElementById('assembly-timer');
+                    const assemblyText = document.getElementById('assembly-timer-text');
+                    assemblyTimer.className = `m3-chip ${currentStyle}`;
+                    assemblyText.textContent = totalSeconds < 0 ? `+${timeText}` : timeText;
                 }
             });
         }
 
-        function updateUI() {
-            const count = tasks.length;
-            document.getElementById('task-counter-container').classList.toggle('hidden', count === 0);
-            document.getElementById('tasks-container').classList.toggle('hidden', count === 0);
-            document.getElementById('empty-state').classList.toggle('hidden', count > 0);
-            document.getElementById('task-counter').textContent = `Ожидают ${count}`;
-            lucide.createIcons();
+        function sortDomElements() {
+            tasks.sort((a, b) => a.durationSeconds - b.durationSeconds);
+            tasks.forEach((task, index) => {
+                if (tasksContainer.children[index] !== task.element) {
+                    tasksContainer.insertBefore(task.element, tasksContainer.children[index]);
+                }
+            });
         }
 
         function openAssembly(id) {
             activeTaskId = id;
+            returnClickCount = 0;
+            hasReachedConfig = false;
+            fabRestore.classList.remove('visible');
+            
             document.getElementById('header-task-id').textContent = id;
-            document.getElementById('page-list').classList.add('page-back-enter');
-            document.getElementById('page-assembly').classList.replace('page-hidden', 'page-active');
-            document.getElementById('stage-coding').classList.add('hidden');
-            document.getElementById('start-overlay').style.display = 'block';
+            
+            const listPage = document.getElementById('page-list');
+            const assemblyPage = document.getElementById('page-assembly');
+            
+            listPage.classList.add('page-back-enter');
+            assemblyPage.classList.remove('page-hidden');
+            assemblyPage.classList.add('page-active');
+            
+            document.getElementById('stage-coding').classList.remove('hidden');
+            document.getElementById('stage-final').classList.add('hidden');
+            document.getElementById('start-overlay').style.display = 'flex';
+            document.getElementById('interactive-area').style.opacity = '0.4';
+            document.getElementById('interactive-area').style.pointerEvents = 'none';
+            document.getElementById('action-area').classList.add('hidden');
+            document.getElementById('return-code-btn').disabled = true;
+            document.getElementById('secondary-btn').classList.remove('visible');
+            document.getElementById('token-input').value = '';
+            document.getElementById('assembly-label').textContent = 'Текущая задача';
+            document.getElementById('assembly-label').className = "text-[12px] uppercase text-blue-400 font-bold tracking-[0.2em] block mb-1 opacity-70";
         }
 
         function closeAssembly() {
-            document.getElementById('page-assembly').classList.add('page-back-exit');
-            document.getElementById('page-list').classList.remove('page-back-enter');
+            const listPage = document.getElementById('page-list');
+            const assemblyPage = document.getElementById('page-assembly');
+            
+            assemblyPage.classList.add('page-back-exit');
+            listPage.classList.remove('page-back-enter');
+            
             setTimeout(() => {
                 activeTaskId = null;
-                document.getElementById('page-assembly').className = 'page page-hidden';
+                assemblyPage.classList.remove('page-active', 'page-back-exit');
+                assemblyPage.classList.add('page-hidden');
+                fabRestore.classList.remove('visible');
+                closeAllSheets();
             }, 500);
         }
 
         function startAssembly() {
             document.getElementById('start-overlay').style.display = 'none';
-            document.getElementById('stage-coding').classList.remove('hidden');
+            document.getElementById('interactive-area').style.opacity = '1';
+            document.getElementById('interactive-area').style.pointerEvents = 'auto';
+            document.getElementById('action-area').classList.remove('hidden');
         }
 
         function copyCode() {
-            navigator.clipboard.writeText(document.getElementById('python-code-block').innerText);
+            const code = document.getElementById('python-code-block').innerText;
+            const el = document.createElement('textarea');
+            el.value = code;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
             document.getElementById('return-code-btn').disabled = false;
         }
 
         function handleReturnClick() {
-            document.getElementById('secondary-btn').classList.remove('opacity-0', 'pointer-events-none');
+            returnClickCount++;
+            if (returnClickCount === 1) {
+                document.getElementById('secondary-btn').classList.add('visible');
+            } else {
+                showNotification('notif-error');
+            }
         }
 
         function openAuthSheet() {
@@ -306,33 +655,77 @@
         }
 
         function authorizeCode() {
-            closeAllSheets();
-            generateTableData();
-            document.getElementById('scrim-main').classList.add('active');
-            document.getElementById('sheet-table').classList.add('open');
+            const token = document.getElementById('token-input').value;
+            if(!token) return;
+            document.getElementById('sheet-auth').classList.remove('open');
+            document.getElementById('secondary-btn').classList.remove('visible');
+            showNotification('notif-success');
+            setTimeout(() => {
+                generateTableData();
+                document.getElementById('scrim-main').classList.add('active');
+                document.getElementById('sheet-table').classList.add('open');
+            }, 1000);
         }
 
         function generateTableData() {
             const tbody = document.getElementById('table-body');
-            tbody.innerHTML = `<tr><td>${Math.floor(100000+Math.random()*900000)}</td><td>ALPHA</td><td>PY_01</td></tr>`;
+            tbody.innerHTML = '';
+            const pythonSnippets = ["bw_limit = 1024 * 50", "socket.setsockopt(SOL_S...)", "traffic_shaper.apply(par...)"];
+            for (let i = 0; i < 3; i++) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${Math.floor(Math.random() * 900000 + 100000)}</td>
+                    <td>${Math.random().toString(36).substring(2, 8)}</td>
+                    <td class="font-mono text-[10px] text-blue-300">PY_CHUNK_${i}: ${pythonSnippets[i]}</td>
+                `;
+                tbody.appendChild(tr);
+            }
         }
 
         function handleTableClose() {
             closeAllSheets();
+            hasReachedConfig = true;
             document.getElementById('stage-coding').classList.add('hidden');
             document.getElementById('stage-final').classList.remove('hidden');
-            document.getElementById('fab-restore').classList.add('visible');
+            fabRestore.classList.add('visible');
+            document.getElementById('assembly-label').textContent = 'Финальный этап';
+            document.getElementById('assembly-label').className = "text-[12px] uppercase text-purple-400 font-bold tracking-[0.2em] block mb-1 opacity-100";
+        }
+
+        function reopenConfigTable() {
+            document.getElementById('scrim-main').classList.add('active');
+            document.getElementById('sheet-table').classList.add('open');
         }
 
         function updateFinalCode() {
             const b1 = document.getElementById('final-block-1').value || '...';
             const b2 = document.getElementById('final-block-2').value || '...';
             document.getElementById('final-code-entry').textContent = `"${b1}", "${b2}"`;
+            document.getElementById('final-code-entry').classList.remove('italic', 'text-white/50');
+            document.getElementById('final-code-entry').classList.add('text-white');
         }
 
-        function finalizeTaskProcess() {
-            showNotification('notif-complete');
-            setTimeout(closeAssembly, 1500);
+        async function finalizeTaskProcess() {
+            const b1 = document.getElementById('final-block-1').value;
+            const b2 = document.getElementById('final-block-2').value;
+            if (!b1 || !b2) {
+                const btn = document.getElementById('finish-task-btn');
+                btn.classList.add('bg-red-500');
+                setTimeout(() => btn.classList.remove('bg-red-500'), 500);
+                return;
+            }
+            const btn = document.getElementById('finish-task-btn');
+            btn.disabled = true;
+            btn.innerHTML = `<span class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> Отправка данных...`;
+            try {
+                await new Promise(r => setTimeout(r, 1500));
+                showNotification('notif-complete');
+                fabRestore.classList.remove('visible');
+                setTimeout(() => { closeAssembly(); }, 1000);
+            } catch (err) {
+                btn.disabled = false;
+                btn.innerHTML = `<i data-lucide="check-circle" class="w-5 h-5"></i> Повторить`;
+            }
         }
 
         function closeAllSheets() {
@@ -343,11 +736,22 @@
         function showNotification(id) {
             const el = document.getElementById(id);
             el.classList.add('show');
-            setTimeout(() => el.classList.remove('show'), 3000);
+            setTimeout(() => el.classList.remove('show'), 3500);
         }
 
-        // ЗАПУСК
-        window.onload = checkAuth;
+        function initAppLogic() {
+            lucide.createIcons();
+            fetchTasks(); 
+            setInterval(tickTimers, 1000); 
+            setInterval(fetchTasks, 3000); 
+            setInterval(sortDomElements, 5000);
+        }
+
+        // --- ENTRY POINT ---
+        window.onload = function() {
+            // First verify user, then load app
+            checkUserAuthorization();
+        };
     </script>
 </body>
 </html>

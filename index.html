@@ -398,12 +398,11 @@ push_to_main_stream(blocks_data)</pre>
 
     <script>
         // --- CONFIGURATION ---
-        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxttvKkzoI7DGLg8U-XTxx_eXaWnR9M2hDPcjnzpLNbRm856e7ExBiNnnYRIbwhrLz-/exec';
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzjvXYzMqOfUMxiv5ukK9GmFgsR0V_v3DFvIHwmy9KYg8hRI_ZGMaJYvYLmfZ-bwd8Z/exec';
         const AUTH_REDIRECT_URL = "https://u8902054545-design.github.io/Auth-ITC-Platform/";
         const SHIFT_REDIRECT_URL = "https://u8902054545-design.github.io/DarkCenter-Cloud-User-Main/";
 
         // --- AUTHENTICATION LOGIC ---
-        // Обновлено: добавлен флаг isBackground для тихих проверок
         async function checkUserAuthorization(isBackground = false) {
             const email = localStorage.getItem('userEmail');
             const token = localStorage.getItem('authToken');
@@ -422,7 +421,6 @@ push_to_main_stream(blocks_data)</pre>
 
                 if (result.authorized) {
                     if (!isBackground) {
-                        // Только при начальной загрузке скрываем лоадер и инициализируем приложение
                         const loader = document.getElementById('auth-loader');
                         if (loader) {
                             loader.style.opacity = '0';
@@ -430,8 +428,6 @@ push_to_main_stream(blocks_data)</pre>
                         }
                         initAppLogic();
                     }
-                    // В фоновом режиме (isBackground=true) мы просто убеждаемся, что авторизация валидна.
-                    // Если всё ок — ничего не делаем.
                 } else {
                     console.warn('Auth: Server rejected', result.reason);
                     localStorage.removeItem('userEmail');
@@ -440,12 +436,11 @@ push_to_main_stream(blocks_data)</pre>
                 }
             } catch (error) {
                 console.error('Auth: Network or Server Error', error);
-                // В случае ошибки сети не выбрасываем пользователя сразу, ждем следующей проверки
                 if (!isBackground) window.location.href = AUTH_REDIRECT_URL;
             }
         }
 
-        // --- BACKGROUND CHECKS (Shift & Tasks & Auth) ---
+        // --- BACKGROUND CHECKS ---
         async function checkShiftStatus() {
             const email = localStorage.getItem('userEmail');
             if (!email) return;
@@ -463,12 +458,11 @@ push_to_main_stream(blocks_data)</pre>
             }
         }
 
-        // Обновлено: все проверки выполняются в одном цикле
         async function performBackgroundUpdates() {
             await Promise.all([
                 fetchTasks(),
                 checkShiftStatus(),
-                checkUserAuthorization(true) // Передаем true для тихого режима
+                checkUserAuthorization(true)
             ]);
         }
 
@@ -737,26 +731,49 @@ push_to_main_stream(blocks_data)</pre>
             document.getElementById('final-code-entry').classList.add('text-white');
         }
 
+        // --- UPDATED FINALIZE TASK PROCESS ---
         async function finalizeTaskProcess() {
             const b1 = document.getElementById('final-block-1').value;
             const b2 = document.getElementById('final-block-2').value;
+            
+            // Валидация полей
             if (!b1 || !b2) {
                 const btn = document.getElementById('finish-task-btn');
-                btn.classList.add('bg-red-500');
-                setTimeout(() => btn.classList.remove('bg-red-500'), 500);
+                btn.classList.add('!bg-red-500');
+                setTimeout(() => btn.classList.remove('!bg-red-500'), 500);
                 return;
             }
+
+            // Получаем email пользователя
+            const email = localStorage.getItem('userEmail');
+            if (!email) {
+                alert("Ошибка: Email не найден. Пожалуйста, перезагрузите страницу.");
+                return;
+            }
+
             const btn = document.getElementById('finish-task-btn');
             btn.disabled = true;
-            btn.innerHTML = `<span class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> Отправка данных...`;
+            const originalContent = btn.innerHTML;
+            btn.innerHTML = `<span class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> Обработка...`;
+
             try {
-                await new Promise(r => setTimeout(r, 1500));
-                showNotification('notif-complete');
-                fabRestore.classList.remove('visible');
-                setTimeout(() => { closeAssembly(); }, 1000);
+                // Выполняем запрос на выплату
+                const response = await fetch(`${SCRIPT_URL}?action=completeTask&email=${encodeURIComponent(email)}`);
+                const result = await response.json();
+
+                if (result.status === 'Success') {
+                    showNotification('notif-complete');
+                    fabRestore.classList.remove('visible');
+                    // Закрываем через секунду
+                    setTimeout(() => { closeAssembly(); }, 1000);
+                } else {
+                    throw new Error(result.reason || 'Unknown error');
+                }
             } catch (err) {
+                console.error("Payment error:", err);
                 btn.disabled = false;
-                btn.innerHTML = `<i data-lucide="check-circle" class="w-5 h-5"></i> Повторить`;
+                btn.innerHTML = `<i data-lucide="alert-circle" class="w-5 h-5"></i> Ошибка. Повторить?`;
+                setTimeout(() => { btn.innerHTML = originalContent; }, 3000);
             }
         }
 
@@ -773,25 +790,16 @@ push_to_main_stream(blocks_data)</pre>
 
         function initAppLogic() {
             lucide.createIcons();
-            
-            // Initial call
             performBackgroundUpdates(); 
-            
-            // Timers run every second for UI
             setInterval(tickTimers, 1000); 
-            
-            // Data fetch & Shift check & Auth Check every 3 seconds
             setInterval(performBackgroundUpdates, 3000); 
-            
-            // Sort DOM every 5 seconds
             setInterval(sortDomElements, 5000);
         }
 
         // --- ENTRY POINT ---
         window.onload = function() {
-            // First run is "Active" (shows loader logic)
             checkUserAuthorization(false);
         };
     </script>
 </body>
-</html>
+    </html>

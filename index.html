@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Manager & Assembly System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        :root {
+            --m3-surface: #1C1B1F;
+            --m3-on-surface: #E6E1E5;
+            --m3-surface-container: #2B2930;
+            --m3-primary: #D0BCFF;
+            --m3-on-primary: #381E72;
+            --m3-secondary-container: #4A4458;
+            --m3-on-secondary-container: #E8DEF8;
+            --m3-error: #F2B8B5;
+            --m3-on-error: #601410;
+            --m3-tertiary-container: #004a77; 
+            --m3-on-tertiary-container: #c2e7ff;
+            --m3-warning-container: #633b00;
+            --m3-on-warning-container: #ffdcbe;
+            --md-sys-color-primary: #D0BCFF;
+            --md-sys-color-surface: #1C1B1F;
+            --md-sys-color-outline: #938F99;
+            --google-table-border: #3c4043;
+            --google-table-header: #202124;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: var(--m3-surface);
+            color: var(--m3-on-surface);
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            height: 100dvh;
+            -webkit-tap-highlight-color: transparent;
+            opacity: 0; /* Скрываем интерфейс до проверки авторизации */
+            transition: opacity 0.3s ease;
+        }
+
+        /* Page Transitions */
+        .page {
+            position: fixed;
+            inset: 0;
+            transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.5s, filter 0.5s;
+            background: var(--m3-surface);
+            z-index: 10;
+            overflow-y: auto;
+        }
+        .page-hidden { transform: translateX(100%); opacity: 0; pointer-events: none; }
+        .page-active { transform: translateX(0); opacity: 1; z-index: 20; }
+        
+        .page-back-exit { transform: translateX(100%); opacity: 0; }
+        .page-back-enter { transform: scale(0.92); opacity: 0.5; filter: brightness(0.5); }
+
+        .sticky-header {
+            position: sticky;
+            top: 0;
+            height: 64px;
+            background-color: var(--m3-surface);
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            z-index: 100;
+            border-bottom: 1px solid rgba(230, 225, 229, 0.1);
+        }
+
+        .m3-card {
+            background-color: var(--m3-surface-container);
+            border-radius: 16px;
+            padding: 16px;
+            transition: transform 0.2s ease;
+            border: 1px solid transparent;
+            cursor: pointer;
+        }
+        .m3-card:active { transform: scale(0.98); }
+
+        .m3-chip {
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-weight: 500;
+            font-size: 0.85rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            justify-content: center;
+        }
+
+        .timer-default { background-color: var(--m3-tertiary-container); color: var(--m3-on-tertiary-container); }
+        .timer-warning { background-color: var(--m3-warning-container); color: var(--m3-on-warning-container); }
+        .timer-error { background-color: var(--m3-on-error); color: var(--m3-error); }
+
+        .notification {
+            position: fixed;
+            top: -100px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: calc(100% - 32px);
+            max-width: 400px;
+            padding: 14px 16px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            z-index: 2000;
+            transition: top 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.6);
+        }
+        .notification.show { top: 16px; }
+        .notification-error { background-color: #920003; color: white; border: 1px solid #FF897A; }
+        .notification-success { background-color: #002104; color: #B4F0AD; border: 1px solid #00390A; }
+        .notification-complete { background-color: #D0BCFF; color: #381E72; border: 1px solid #D0BCFF; }
+
+        .scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.6); opacity: 0; visibility: hidden; transition: 0.3s; z-index: 1000; }
+        .scrim.active { opacity: 1; visibility: visible; }
+        
+        .bottom-sheet {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: var(--m3-surface-container);
+            border-radius: 28px 28px 0 0;
+            padding: 24px;
+            transform: translateY(100%);
+            transition: transform 0.4s cubic-bezier(0.32, 1, 0.23, 1);
+            z-index: 1001;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .bottom-sheet.open { transform: translateY(0); }
+
+        .m3-button {
+            background-color: var(--md-sys-color-primary);
+            color: var(--m3-on-primary);
+            border-radius: 100px;
+            padding: 14px 28px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .m3-button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .google-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #1e1e1e; border: 1px solid var(--google-table-border); }
+        .google-table th { background: var(--google-table-header); border: 1px solid var(--google-table-border); padding: 8px 12px; text-align: left; color: #bdc1c6; }
+        .google-table td { border: 1px solid var(--google-table-border); padding: 8px 12px; color: #e8eaed; }
+
+        .m3-textfield { position: relative; width: 100%; margin-bottom: 24px; }
+        .m3-textfield input { width: 100%; background: transparent; border: 1px solid var(--md-sys-color-outline); border-radius: 8px; padding: 16px; color: white; outline: none; }
+        .m3-textfield label { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); background: var(--m3-surface-container); padding: 0 4px; color: #999; pointer-events: none; transition: 0.2s; }
+        .m3-textfield input:focus + label, .m3-textfield input:not(:placeholder-shown) + label { top: 0; font-size: 12px; color: var(--m3-primary); }
+
+        .fab-recovery {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            width: 56px;
+            height: 56px;
+            border-radius: 16px;
+            background: var(--m3-secondary-container);
+            color: var(--m3-on-secondary-container);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            z-index: 50;
+            transform: scale(0);
+            transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .fab-recovery.visible { transform: scale(1); }
+    </style>
+</head>
+<body>
+
+    <div id="notif-error" class="notification notification-error">
+        <div class="bg-[#FFB4AB] text-[#690005] rounded-full p-1"><i data-lucide="x" class="w-4 h-4"></i></div>
+        <span class="text-sm font-bold">Ошибка: Функция «Return» заблокирована</span>
+    </div>
+    <div id="notif-success" class="notification notification-success">
+        <i data-lucide="check" class="w-5 h-5"></i>
+        <span class="text-sm font-medium">Авторизированный код пропущен</span>
+    </div>
+    <div id="notif-complete" class="notification notification-complete">
+        <i data-lucide="party-popper" class="w-5 h-5"></i>
+        <span class="text-sm font-bold uppercase tracking-wide">Выполнение задачи завершено</span>
+    </div>
+
+    <div id="page-list" class="page page-active">
+        <header class="sticky-header">
+            <button class="p-2 -ml-2 rounded-full hover:bg-white/10" onclick="window.location.reload()"><i data-lucide="arrow-left" class="w-6 h-6"></i></button>
+            <h1 class="text-xl font-medium absolute left-1/2 -translate-x-1/2">Разработка</h1>
+        </header>
+        <div class="max-w-md mx-auto p-4">
+            <div id="task-counter-container" class="mb-6 hidden">
+                <h2 id="task-counter" class="text-3xl font-bold text-[#E6E1E5]">Ожидают 0</h2>
+            </div>
+            <div id="tasks-container" class="space-y-3 hidden"></div>
+            <div id="empty-state" class="flex flex-col items-center justify-center py-20">
+                <div class="bg-white/5 p-8 rounded-full mb-6"><i data-lucide="package-search" class="w-16 h-16 text-white/20"></i></div>
+                <p class="text-[#938F99] text-lg">Ждём новые задачи</p>
+                <p class="text-[#938F99]/60 text-sm mt-1">Они появятся автоматически</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="page-assembly" class="page page-hidden">
+        <header class="sticky-header justify-between">
+            <button onclick="closeAssembly()" class="p-2 -ml-2 rounded-full hover:bg-white/10"><i data-lucide="arrow-left" class="w-6 h-6"></i></button>
+            <div id="assembly-timer" class="m3-chip timer-default">
+                <i data-lucide="timer" class="w-3.5 h-3.5"></i>
+                <span id="assembly-timer-text">--:--</span>
+            </div>
+        </header>
+
+        <div class="p-6 flex flex-col items-center max-w-xl mx-auto w-full gap-6">
+            <div class="w-full text-center mb-4">
+                <span id="assembly-label" class="text-[12px] uppercase text-blue-400 font-bold tracking-[0.2em] block mb-1 opacity-70">Текущая задача</span>
+                <h2 id="header-task-id" class="text-3xl font-black text-white tracking-tight break-all leading-tight">----</h2>
+            </div>
+
+            <div id="start-overlay" class="w-full flex justify-center py-6">
+                <button onclick="startAssembly()" class="m3-button text-lg px-10 py-5 shadow-2xl">
+                    <i data-lucide="play" class="w-5 h-5 fill-current"></i> Начать выполнение
+                </button>
+            </div>
+
+            <div id="stage-coding" class="w-full space-y-6">
+                <div id="interactive-area" class="opacity-40 pointer-events-none transition-opacity duration-300 w-full">
+                    <h2 class="text-xs font-bold uppercase tracking-widest mb-3 text-blue-500 opacity-80">Python Source (Initial)</h2>
+                    <div class="bg-[#000] rounded-[24px] p-6 border border-[#333] relative w-full shadow-lg">
+                        <pre id="python-code-block" class="text-sm text-[#A6E22E] font-['Fira_Code']">import sys
+import auth_module
+
+def verify_token(token):
+    return auth_module.check(token)
+
+verify_token("SYSTEM_AUTH")</pre>
+                        <button onclick="copyCode()" class="absolute top-4 right-4 p-2 hover:bg-white/10 rounded-full text-blue-400">
+                            <i data-lucide="copy" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="action-area" class="w-full flex flex-col items-center gap-4 hidden">
+                    <button id="return-code-btn" disabled onclick="handleReturnClick()" class="m3-button w-full">Вернуть входной код</button>
+                    <button id="secondary-btn" onclick="openAuthSheet()" class="m3-button-tonal w-full opacity-0 pointer-events-none transition-all duration-300">Return of block input</button>
+                </div>
+            </div>
+
+            <div id="stage-final" class="w-full hidden space-y-6">
+                 <h2 class="text-xs font-bold uppercase tracking-widest mb-1 text-purple-400">Integrate Configuration</h2>
+                 <div class="bg-[#0b0a0d] rounded-[24px] p-6 border border-purple-900/30 w-full shadow-xl">
+                    <pre class="text-[13px] text-purple-300 font-['Fira_Code'] leading-relaxed">
+def push_to_main_stream(blocks):
+    for block in blocks:
+        sys.net.stream(block)
+    return True
+
+blocks_data = [<span id="final-code-entry" class="italic text-white/50">"...", "..."</span>]</pre>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="m3-textfield !mb-0"><input type="text" id="final-block-1" placeholder=" " oninput="updateFinalCode()"><label>Block ID 1</label></div>
+                    <div class="m3-textfield !mb-0"><input type="text" id="final-block-2" placeholder=" " oninput="updateFinalCode()"><label>Block ID 2</label></div>
+                </div>
+
+                <button id="finish-task-btn" onclick="finalizeTaskProcess()" class="m3-button w-full !bg-purple-500 !text-white shadow-lg">
+                    <i data-lucide="check-circle" class="w-5 h-5"></i> Завершить выполнение
+                </button>
+            </div>
+        </div>
+        
+        <button id="fab-restore" class="fab-recovery" onclick="reopenConfigTable()"><i data-lucide="table"></i></button>
+    </div>
+
+    <div id="scrim-main" class="scrim" onclick="closeAllSheets()"></div>
+
+    <div id="sheet-deleted" class="bottom-sheet">
+        <div class="w-8 h-1 bg-gray-600 rounded-full mx-auto mb-6"></div>
+        <div class="flex flex-col items-center text-center px-2">
+            <div class="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4"><i data-lucide="alert-circle" class="w-6 h-6 text-red-400"></i></div>
+            <h3 class="text-xl font-semibold mb-2">Задача недоступна</h3>
+            <p class="text-[#938F99] text-sm mb-8">Данная задача была удалена или взята другим пользователем.</p>
+            <button onclick="closeAllSheets()" class="m3-button w-full">Понятно</button>
+        </div>
+    </div>
+
+    <div id="sheet-auth" class="bottom-sheet">
+        <div class="w-8 h-1 bg-gray-600 rounded-full mx-auto mb-6"></div>
+        <h3 class="text-xl font-medium mb-6 text-center">Укажи токен блока Python</h3>
+        <div class="m3-textfield"><input type="text" id="token-input" placeholder=" " autocomplete="off"><label>Токен</label></div>
+        <button onclick="authorizeCode()" class="m3-button w-full">Авторизовать код</button>
+    </div>
+
+    <div id="sheet-table" class="bottom-sheet !max-w-2xl">
+        <div class="w-8 h-1 bg-gray-600 rounded-full mx-auto mb-6"></div>
+        <div class="overflow-x-auto rounded-lg mb-6">
+            <table class="google-table"><thead><tr><th>Auth Block</th><th>Name Block</th><th>Access code</th></tr></thead><tbody id="table-body"></tbody></table>
+        </div>
+        <button onclick="handleTableClose()" class="m3-button w-full !bg-transparent !text-blue-400 border border-blue-400/30">Подтвердить</button>
+    </div>
+
+    <script>
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyAuO5gLc4VN7r-zKOva8VuxAyueAJ4j-DMtJuSo6jNtMPjjXtcwKlL7ExrdI2WMlnD/exec';
+        const AUTH_REDIRECT_URL = 'https://u8902054545-design.github.io/Auth-ITC-Platform/';
+
+        let tasks = [];
+        let activeTaskId = null;
+        let returnClickCount = 0;
+        let isFetching = false;
+
+        // --- МУЛЬТИПОЛЬЗОВАТЕЛЬСКАЯ СИСТЕМА (АВТОРИЗАЦИЯ) ---
+        async function checkAuth() {
+            const email = localStorage.getItem('userEmail');
+            const token = localStorage.getItem('authToken');
+
+            if (!email || !token) {
+                window.location.href = AUTH_REDIRECT_URL;
+                return;
+            }
+
+            try {
+                // Вызываем функцию checkUserAccess из Code.gs
+                google.script.run
+                    .withSuccessHandler((response) => {
+                        if (response && response.success) {
+                            document.body.style.opacity = "1"; // Показываем контент
+                            initApp();
+                        } else {
+                            window.location.href = AUTH_REDIRECT_URL;
+                        }
+                    })
+                    .withFailureHandler(() => {
+                        window.location.href = AUTH_REDIRECT_URL;
+                    })
+                    .checkUserAccess(email, token);
+            } catch (e) {
+                window.location.href = AUTH_REDIRECT_URL;
+            }
+        }
+
+        // --- ЛОГИКА ПРИЛОЖЕНИЯ ---
+        function initApp() {
+            lucide.createIcons();
+            fetchTasks(); 
+            setInterval(tickTimers, 1000); 
+            setInterval(fetchTasks, 3000); 
+        }
+
+        async function fetchTasks() {
+            if (isFetching) return;
+            isFetching = true;
+            try {
+                const response = await fetch(`${SCRIPT_URL}?action=getTasks`);
+                const serverTasks = await response.json();
+                const serverIds = serverTasks.map(st => st.id);
+                
+                if (activeTaskId && !serverIds.includes(activeTaskId)) handleTaskVanished();
+
+                tasks = tasks.filter(t => {
+                    if (!serverIds.includes(t.id)) { t.element.remove(); return false; }
+                    return true;
+                });
+
+                serverTasks.forEach(st => {
+                    const existing = tasks.find(t => t.id === st.id);
+                    if (existing) {
+                        existing.durationSeconds = st.durationSeconds;
+                    } else {
+                        const taskObj = createTaskIdObj(st.id, st.durationSeconds);
+                        tasks.push(taskObj);
+                        document.getElementById('tasks-container').appendChild(taskObj.element);
+                    }
+                });
+
+                updateTaskCounter();
+                sortDomElements();
+                lucide.createIcons();
+            } catch (err) {} finally { isFetching = false; }
+        }
+
+        function createTaskIdObj(id, duration) {
+            const card = document.createElement('div');
+            card.className = 'm3-card w-full text-left';
+            card.onclick = () => openAssembly(id);
+            card.innerHTML = `
+                <div class="flex items-start justify-between gap-4">
+                    <div class="flex flex-col gap-1">
+                        <span class="text-[11px] uppercase tracking-wider text-[#938F99] font-bold">Задача</span>
+                        <span class="text-sm font-medium text-[#E6E1E5] break-all">${id}</span>
+                    </div>
+                    <div class="timer-display m3-chip timer-default">
+                        <i data-lucide="timer" class="w-3.5 h-3.5"></i>
+                        <span class="time-text">--:--</span>
+                    </div>
+                </div>
+            `;
+            return { id, durationSeconds: duration, element: card };
+        }
+
+        function formatTime(totalSeconds) {
+            const abs = Math.abs(totalSeconds);
+            const m = Math.floor(abs / 60);
+            const s = abs % 60;
+            return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        }
+
+        function tickTimers() {
+            tasks.forEach(task => {
+                task.durationSeconds--;
+                const ts = task.durationSeconds;
+                const chip = task.element.querySelector('.timer-display');
+                const timeSpan = task.element.querySelector('.time-text');
+                const timeText = formatTime(ts);
+                
+                chip.classList.remove('timer-default', 'timer-warning', 'timer-error');
+                let style = ts < 0 ? 'timer-error' : (ts <= 60 ? 'timer-warning' : 'timer-default');
+                chip.classList.add(style);
+                timeSpan.textContent = ts < 0 ? `+${timeText}` : timeText;
+
+                if (activeTaskId === task.id) {
+                    document.getElementById('assembly-timer').className = `m3-chip ${style}`;
+                    document.getElementById('assembly-timer-text').textContent = ts < 0 ? `+${timeText}` : timeText;
+                }
+            });
+        }
+
+        function updateTaskCounter() {
+            const count = tasks.length;
+            document.getElementById('task-counter-container').classList.toggle('hidden', count === 0);
+            document.getElementById('tasks-container').classList.toggle('hidden', count === 0);
+            document.getElementById('empty-state').classList.toggle('hidden', count > 0);
+            document.getElementById('task-counter').textContent = `Ожидают ${count}`;
+        }
+
+        function sortDomElements() {
+            tasks.sort((a, b) => a.durationSeconds - b.durationSeconds);
+            const container = document.getElementById('tasks-container');
+            tasks.forEach((t, i) => { if (container.children[i] !== t.element) container.insertBefore(t.element, container.children[i]); });
+        }
+
+        function openAssembly(id) {
+            activeTaskId = id;
+            returnClickCount = 0;
+            document.getElementById('header-task-id').textContent = id;
+            document.getElementById('page-list').classList.add('page-back-enter');
+            document.getElementById('page-assembly').classList.replace('page-hidden', 'page-active');
+            document.getElementById('stage-coding').classList.remove('hidden');
+            document.getElementById('stage-final').classList.add('hidden');
+            document.getElementById('start-overlay').style.display = 'flex';
+            document.getElementById('interactive-area').style.opacity = '0.4';
+            document.getElementById('action-area').classList.add('hidden');
+            document.getElementById('secondary-btn').classList.add('opacity-0', 'pointer-events-none');
+        }
+
+        function closeAssembly() {
+            document.getElementById('page-assembly').classList.add('page-back-exit');
+            document.getElementById('page-list').classList.remove('page-back-enter');
+            setTimeout(() => {
+                activeTaskId = null;
+                document.getElementById('page-assembly').className = 'page page-hidden';
+                closeAllSheets();
+            }, 500);
+        }
+
+        function startAssembly() {
+            document.getElementById('start-overlay').style.display = 'none';
+            document.getElementById('interactive-area').style.opacity = '1';
+            document.getElementById('interactive-area').style.pointerEvents = 'auto';
+            document.getElementById('action-area').classList.remove('hidden');
+        }
+
+        function copyCode() {
+            navigator.clipboard.writeText(document.getElementById('python-code-block').innerText);
+            document.getElementById('return-code-btn').disabled = false;
+        }
+
+        function handleReturnClick() {
+            returnClickCount++;
+            if (returnClickCount === 1) {
+                document.getElementById('secondary-btn').classList.remove('opacity-0', 'pointer-events-none');
+            } else {
+                showNotification('notif-error');
+            }
+        }
+
+        function openAuthSheet() {
+            document.getElementById('scrim-main').classList.add('active');
+            document.getElementById('sheet-auth').classList.add('open');
+        }
+
+        function authorizeCode() {
+            if(!document.getElementById('token-input').value) return;
+            closeAllSheets();
+            showNotification('notif-success');
+            setTimeout(() => {
+                generateTableData();
+                document.getElementById('scrim-main').classList.add('active');
+                document.getElementById('sheet-table').classList.add('open');
+            }, 800);
+        }
+
+        function generateTableData() {
+            const tbody = document.getElementById('table-body');
+            tbody.innerHTML = '';
+            for (let i = 0; i < 3; i++) {
+                tbody.innerHTML += `<tr><td>${Math.floor(100000+Math.random()*900000)}</td><td>${(Math.random()+1).toString(36).substring(7)}</td><td class="text-blue-300">CHUNK_${i}</td></tr>`;
+            }
+        }
+
+        function handleTableClose() {
+            closeAllSheets();
+            document.getElementById('stage-coding').classList.add('hidden');
+            document.getElementById('stage-final').classList.remove('hidden');
+            document.getElementById('fab-restore').classList.add('visible');
+        }
+
+        function updateFinalCode() {
+            const b1 = document.getElementById('final-block-1').value || '...';
+            const b2 = document.getElementById('final-block-2').value || '...';
+            document.getElementById('final-code-entry').innerHTML = `"${b1}", "${b2}"`;
+        }
+
+        async function finalizeTaskProcess() {
+            if(!document.getElementById('final-block-1').value || !document.getElementById('final-block-2').value) return;
+            showNotification('notif-complete');
+            setTimeout(closeAssembly, 1500);
+        }
+
+        function closeAllSheets() {
+            document.getElementById('scrim-main').classList.remove('active');
+            document.querySelectorAll('.bottom-sheet').forEach(s => s.classList.remove('open'));
+        }
+
+        function showNotification(id) {
+            const el = document.getElementById(id);
+            el.classList.add('show');
+            setTimeout(() => el.classList.remove('show'), 3000);
+        }
+
+        function handleTaskVanished() {
+            closeAssembly();
+            document.getElementById('scrim-main').classList.add('active');
+            document.getElementById('sheet-deleted').classList.add('open');
+        }
+
+        // Запуск проверки при загрузке
+        window.onload = checkAuth;
+    </script>
+</body>
+</html>

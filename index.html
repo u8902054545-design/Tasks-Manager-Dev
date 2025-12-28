@@ -49,6 +49,7 @@
             --md-sys-color-outline: #938F99;
             --google-table-border: #3c4043;
             --google-table-header: #202124;
+            --active-task-color: #2d2a35;
         }
 
         body {
@@ -120,6 +121,11 @@
             cursor: pointer;
         }
         .m3-card:active { transform: scale(0.98); }
+        
+        .m3-card-active {
+            background-color: var(--active-task-color);
+            border: 1px solid var(--m3-primary);
+        }
 
         .m3-chip {
             border-radius: 8px;
@@ -267,11 +273,18 @@
             <h1 class="text-xl font-medium absolute left-1/2 -translate-x-1/2">Разработка</h1>
         </header>
         <div class="max-w-md mx-auto p-4">
-            <div id="task-counter-container" class="mb-6 hidden">
+            
+            <div id="active-tasks-wrapper" class="hidden mb-6">
+                <h2 id="active-tasks-header" class="text-xs font-bold uppercase tracking-widest text-blue-400 mb-3 opacity-90 pl-1"></h2>
+                <div id="active-tasks-container" class="space-y-3"></div>
+                <div class="h-px bg-white/5 my-6"></div> </div>
+
+            <div id="task-counter-container" class="mb-4 hidden">
                 <h2 id="task-counter" class="text-3xl font-bold text-[#E6E1E5]">Ожидают 0</h2>
             </div>
             <div id="tasks-container" class="space-y-3 hidden"></div>
-            <div id="empty-state" class="flex flex-col items-center justify-center py-20">
+            
+            <div id="empty-state" class="flex flex-col items-center justify-center py-10 hidden">
                 <div class="bg-white/5 p-8 rounded-full mb-6"><i data-lucide="package-search" class="w-16 h-16 text-white/20"></i></div>
                 <p class="text-[#938F99] text-lg">Ждём новые задачи</p>
                 <p class="text-[#938F99]/60 text-sm mt-1">Они появятся автоматически</p>
@@ -398,7 +411,7 @@ push_to_main_stream(blocks_data)</pre>
 
     <script>
         // --- CONFIGURATION ---
-        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbytCgDdf_1IVK9PER_dh6XxH8zpC12Ae2dqFzUEgo4HFpxceMe6b0EEeRrv-s7gZpV_/exec';
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxY22yq2uRTuom2XdTR1-fPBuzFNhJ4yLQqCgLBBJ92l7QVc7HZeTBZXyix_bIoy7kG/exec';
         const AUTH_REDIRECT_URL = "https://u8902054545-design.github.io/Auth-ITC-Platform/";
         const SHIFT_REDIRECT_URL = "https://u8902054545-design.github.io/DarkCenter-Cloud-User-Main/";
 
@@ -407,14 +420,12 @@ push_to_main_stream(blocks_data)</pre>
             const email = localStorage.getItem('userEmail');
             const token = localStorage.getItem('authToken');
 
-            // 1. Local Check
             if (!email || !token) {
-                console.warn('Auth: Credentials missing in localStorage');
+                console.warn('Auth: Credentials missing');
                 window.location.href = AUTH_REDIRECT_URL;
                 return;
             }
 
-            // 2. Server Check
             try {
                 const response = await fetch(`${SCRIPT_URL}?action=checkAuth&email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`);
                 const result = await response.json();
@@ -429,52 +440,47 @@ push_to_main_stream(blocks_data)</pre>
                         initAppLogic();
                     }
                 } else {
-                    console.warn('Auth: Server rejected', result.reason);
                     localStorage.removeItem('userEmail');
                     localStorage.removeItem('authToken');
                     window.location.href = AUTH_REDIRECT_URL;
                 }
             } catch (error) {
-                console.error('Auth: Network or Server Error', error);
+                console.error('Auth check error', error);
                 if (!isBackground) window.location.href = AUTH_REDIRECT_URL;
             }
         }
 
-        // --- BACKGROUND CHECKS ---
         async function checkShiftStatus() {
             const email = localStorage.getItem('userEmail');
             if (!email) return;
-
             try {
                 const response = await fetch(`${SCRIPT_URL}?action=checkShift&email=${encodeURIComponent(email)}`);
                 const data = await response.json();
-                
-                if (data.status === 'Closed') {
-                    console.warn("Shift Closed. Redirecting...");
-                    window.location.href = SHIFT_REDIRECT_URL;
-                }
-            } catch (e) {
-                console.error("Background shift check error:", e);
-            }
+                if (data.status === 'Closed') window.location.href = SHIFT_REDIRECT_URL;
+            } catch (e) { console.error("Shift check error:", e); }
         }
 
         async function performBackgroundUpdates() {
             await Promise.all([
                 fetchTasks(),
+                fetchUserActiveTasks(),
                 checkShiftStatus(),
                 checkUserAuthorization(true)
             ]);
         }
 
-        // --- CORE APP LOGIC ---
-        let tasks = [];
+        // --- CORE LOGIC ---
+        let poolTasks = [];
+        let userActiveTasks = [];
         let activeTaskId = null;
         let returnClickCount = 0;
         let isFetching = false;
-        let hasReachedConfig = false;
-
+        
         // Elements
         const tasksContainer = document.getElementById('tasks-container');
+        const activeTasksContainer = document.getElementById('active-tasks-container');
+        const activeTasksWrapper = document.getElementById('active-tasks-wrapper');
+        const activeTasksHeader = document.getElementById('active-tasks-header');
         const taskCounter = document.getElementById('task-counter');
         const taskCounterContainer = document.getElementById('task-counter-container');
         const emptyState = document.getElementById('empty-state');
@@ -487,26 +493,15 @@ push_to_main_stream(blocks_data)</pre>
             return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
         }
 
+        // 1. Fetch Waiting Tasks (Pool)
         async function fetchTasks() {
-            if (isFetching) return;
-            isFetching = true;
             try {
                 const response = await fetch(`${SCRIPT_URL}?action=getTasks`);
                 const serverTasks = await response.json();
                 const serverIds = serverTasks.map(st => st.id);
-                
-                if (activeTaskId && !serverIds.includes(activeTaskId)) {
-                    // ЕСЛИ МЫ УЖЕ НАЧАЛИ (ВЗЯЛИ) ЗАДАЧУ, ОНА УЖЕ УДАЛЕНА ИЗ СПИСКА,
-                    // ПОЭТОМУ МЫ НЕ ДОЛЖНЫ СЧИТАТЬ ЕЁ "ПРОПАВШЕЙ", ЕСЛИ МЫ НА ЭТАПЕ ВЫПОЛНЕНИЯ.
-                    // ПРОВЕРКА НИЖЕ СРАБОТАЕТ ТОЛЬКО ЕСЛИ МЫ ЕЩЕ НЕ НАЧАЛИ (НЕТ НА ЛИСТЕ USER).
-                    const overlayDisplay = document.getElementById('start-overlay').style.display;
-                    // Если оверлей виден (значит мы еще не начали), и задачи нет в списке -> она пропала
-                    if (overlayDisplay !== 'none') {
-                         handleTaskVanished();
-                    }
-                }
 
-                tasks = tasks.filter(t => {
+                // Если задача пропала из пула, но мы её не взяли и не она у нас в активе - просто удаляем из DOM
+                poolTasks = poolTasks.filter(t => {
                     if (!serverIds.includes(t.id)) {
                         t.element.remove();
                         return false;
@@ -515,44 +510,78 @@ push_to_main_stream(blocks_data)</pre>
                 });
 
                 serverTasks.forEach(st => {
-                    const existing = tasks.find(t => t.id === st.id);
+                    const existing = poolTasks.find(t => t.id === st.id);
                     if (existing) {
-                        if (Math.abs(existing.durationSeconds - st.durationSeconds) > 5) {
-                            existing.durationSeconds = st.durationSeconds;
-                        }
+                         existing.durationSeconds = st.durationSeconds; // sync time
                     } else {
-                        const taskObj = createTaskIdObj(st.id, st.durationSeconds);
-                        tasks.push(taskObj);
+                        const taskObj = createTaskIdObj(st.id, st.durationSeconds, false);
+                        poolTasks.push(taskObj);
                         tasksContainer.appendChild(taskObj.element);
                     }
                 });
 
-                updateTaskCounter();
-                sortDomElements();
+                updatePoolCounter();
+                sortDomElements(poolTasks, tasksContainer);
                 lucide.createIcons();
-            } catch (error) {
-                console.error('Fetch error:', error);
-            } finally {
-                isFetching = false;
-            }
+            } catch (error) { console.error('Fetch pool error:', error); }
         }
 
-        function handleTaskVanished() {
-            closeAssembly();
-            setTimeout(() => {
-                document.getElementById('scrim-main').classList.add('active');
-                document.getElementById('sheet-deleted').classList.add('open');
-            }, 300);
+        // 2. Fetch User Active Tasks (In Progress)
+        async function fetchUserActiveTasks() {
+            const email = localStorage.getItem('userEmail');
+            if(!email) return;
+
+            try {
+                const response = await fetch(`${SCRIPT_URL}?action=getUserActiveTasks&email=${encodeURIComponent(email)}`);
+                const activeData = await response.json();
+                
+                // Diff logic similar to pool
+                const activeIds = activeData.map(t => t.id);
+                
+                // Remove finished or vanished
+                userActiveTasks = userActiveTasks.filter(t => {
+                    if (!activeIds.includes(t.id)) {
+                        t.element.remove();
+                        return false;
+                    }
+                    return true;
+                });
+
+                activeData.forEach(st => {
+                    const existing = userActiveTasks.find(t => t.id === st.id);
+                    if (existing) {
+                        existing.durationSeconds = st.durationSeconds;
+                        existing.stage = st.stage; // Update stage from server
+                    } else {
+                        const taskObj = createTaskIdObj(st.id, st.durationSeconds, true, st.stage);
+                        userActiveTasks.push(taskObj);
+                        activeTasksContainer.appendChild(taskObj.element);
+                    }
+                });
+
+                updateActiveCounter();
+                sortDomElements(userActiveTasks, activeTasksContainer);
+                lucide.createIcons();
+
+            } catch (error) { console.error('Fetch active error:', error); }
         }
 
-        function createTaskIdObj(id, duration) {
+        function createTaskIdObj(id, duration, isActive, stage = 'ASSEMBLY') {
             const card = document.createElement('div');
-            card.className = 'm3-card w-full text-left';
-            card.onclick = () => openAssembly(id);
+            // Если задача активная, даем ей особый стиль
+            card.className = isActive ? 'm3-card m3-card-active w-full text-left' : 'm3-card w-full text-left';
+            
+            // Onclick behavior:
+            // Pool task -> openAssembly (standard)
+            // Active task -> restoreSession (restore state)
+            card.onclick = isActive ? () => restoreSession(id, stage) : () => openAssembly(id);
+
             card.innerHTML = `
                 <div class="flex items-start justify-between gap-4">
                     <div class="flex flex-col gap-1">
-                        <span class="text-[11px] uppercase tracking-wider text-[#938F99] font-bold">Задача</span>
+                        <span class="text-[11px] uppercase tracking-wider ${isActive ? 'text-blue-300' : 'text-[#938F99]'} font-bold">
+                            ${isActive ? 'В работе' : 'Задача'}
+                        </span>
                         <span class="text-sm font-medium text-[#E6E1E5] break-all">${id}</span>
                     </div>
                     <div class="timer-display m3-chip timer-default">
@@ -561,27 +590,46 @@ push_to_main_stream(blocks_data)</pre>
                     </div>
                 </div>
             `;
-            return { id, durationSeconds: duration, element: card };
+            return { id, durationSeconds: duration, element: card, isActive, stage };
         }
 
-        function updateTaskCounter() {
-            const count = tasks.length;
+        function updatePoolCounter() {
+            const count = poolTasks.length;
             taskCounterContainer.classList.toggle('hidden', count === 0);
             tasksContainer.classList.toggle('hidden', count === 0);
-            emptyState.classList.toggle('hidden', count > 0);
+            // Если активных задач нет, показываем empty state при пустом пуле
+            if(userActiveTasks.length === 0) {
+                 emptyState.classList.toggle('hidden', count > 0);
+            } else {
+                 emptyState.classList.add('hidden');
+            }
             if(count > 0) taskCounter.textContent = `Ожидают ${count}`;
         }
 
+        function updateActiveCounter() {
+            const count = userActiveTasks.length;
+            activeTasksWrapper.classList.toggle('hidden', count === 0);
+            if (count > 0) {
+                activeTasksHeader.textContent = `Выполняю разработку ${count}`;
+                emptyState.classList.add('hidden');
+            } else {
+                if(poolTasks.length === 0) emptyState.classList.remove('hidden');
+            }
+        }
+
         function tickTimers() {
-            tasks.forEach(task => {
+            const allTasks = [...poolTasks, ...userActiveTasks];
+            allTasks.forEach(task => {
                 task.durationSeconds--;
                 const totalSeconds = task.durationSeconds;
                 const chip = task.element.querySelector('.timer-display');
                 const timeSpan = task.element.querySelector('.time-text');
                 if (!chip || !timeSpan) return;
+                
                 const timeText = formatTime(totalSeconds);
                 chip.classList.remove('timer-default', 'timer-warning', 'timer-error');
                 let currentStyle = '';
+                
                 if (totalSeconds < 0) {
                     currentStyle = 'timer-error';
                     timeSpan.textContent = `+${timeText}`;
@@ -593,6 +641,7 @@ push_to_main_stream(blocks_data)</pre>
                     timeSpan.textContent = timeText;
                 }
                 chip.classList.add(currentStyle);
+
                 if (activeTaskId === task.id) {
                     const assemblyTimer = document.getElementById('assembly-timer');
                     const assemblyText = document.getElementById('assembly-timer-text');
@@ -602,118 +651,146 @@ push_to_main_stream(blocks_data)</pre>
             });
         }
 
-        function sortDomElements() {
-            tasks.sort((a, b) => a.durationSeconds - b.durationSeconds);
-            tasks.forEach((task, index) => {
-                if (tasksContainer.children[index] !== task.element) {
-                    tasksContainer.insertBefore(task.element, tasksContainer.children[index]);
+        function sortDomElements(arr, container) {
+            arr.sort((a, b) => a.durationSeconds - b.durationSeconds);
+            arr.forEach((task, index) => {
+                if (container.children[index] !== task.element) {
+                    container.insertBefore(task.element, container.children[index]);
                 }
             });
         }
 
+        // --- NAVIGATION & STAGES ---
+
+        // 1. Open New Task from Pool
         function openAssembly(id) {
             activeTaskId = id;
             returnClickCount = 0;
-            hasReachedConfig = false;
             fabRestore.classList.remove('visible');
             
             document.getElementById('header-task-id').textContent = id;
-            
-            const listPage = document.getElementById('page-list');
-            const assemblyPage = document.getElementById('page-assembly');
-            
-            listPage.classList.add('page-back-enter');
-            assemblyPage.classList.remove('page-hidden');
-            assemblyPage.classList.add('page-active');
-            
+            setupPageTransition();
+
+            // Reset UI for "New Start"
             document.getElementById('stage-coding').classList.remove('hidden');
             document.getElementById('stage-final').classList.add('hidden');
-            
-            // Сбрасываем состояние
             document.getElementById('start-overlay').style.display = 'flex';
-            document.getElementById('btn-start-assembly').disabled = false;
-            document.getElementById('btn-start-assembly').innerHTML = '<i data-lucide="play" class="w-5 h-5 fill-current"></i> Начать выполнение';
-            lucide.createIcons();
-
+            
             document.getElementById('interactive-area').style.opacity = '0.4';
             document.getElementById('interactive-area').style.pointerEvents = 'none';
             document.getElementById('action-area').classList.add('hidden');
-            document.getElementById('return-code-btn').disabled = true;
-            document.getElementById('secondary-btn').classList.remove('visible');
             document.getElementById('token-input').value = '';
-            document.getElementById('assembly-label').textContent = 'Текущая задача';
-            document.getElementById('assembly-label').className = "text-[12px] uppercase text-blue-400 font-bold tracking-[0.2em] block mb-1 opacity-70";
+            
+            document.getElementById('btn-start-assembly').disabled = false;
+            document.getElementById('btn-start-assembly').innerHTML = '<i data-lucide="play" class="w-5 h-5 fill-current"></i> Начать выполнение';
+            
+            setAssemblyLabel('Текущая задача', 'blue');
+        }
+
+        // 2. Restore Active Task Session
+        function restoreSession(id, stage) {
+            activeTaskId = id;
+            returnClickCount = 0;
+            fabRestore.classList.remove('visible');
+            document.getElementById('header-task-id').textContent = id;
+            setupPageTransition();
+
+            // It's already started, so hide start button
+            document.getElementById('start-overlay').style.display = 'none';
+
+            if (stage === 'FINAL') {
+                // Restore to Final Stage
+                document.getElementById('stage-coding').classList.add('hidden');
+                document.getElementById('stage-final').classList.remove('hidden');
+                fabRestore.classList.add('visible');
+                setAssemblyLabel('Финальный этап', 'purple');
+            } else {
+                // Restore to Coding Stage (Already unlocked)
+                document.getElementById('stage-coding').classList.remove('hidden');
+                document.getElementById('stage-final').classList.add('hidden');
+                
+                document.getElementById('interactive-area').style.opacity = '1';
+                document.getElementById('interactive-area').style.pointerEvents = 'auto';
+                document.getElementById('action-area').classList.remove('hidden');
+                document.getElementById('secondary-btn').classList.remove('visible');
+                document.getElementById('return-code-btn').disabled = true; // User needs to copy again if they left
+                
+                setAssemblyLabel('Текущая задача', 'blue');
+            }
+        }
+
+        function setupPageTransition() {
+            const listPage = document.getElementById('page-list');
+            const assemblyPage = document.getElementById('page-assembly');
+            listPage.classList.add('page-back-enter');
+            assemblyPage.classList.remove('page-hidden');
+            assemblyPage.classList.add('page-active');
+            lucide.createIcons();
+        }
+
+        function setAssemblyLabel(text, color) {
+            const lbl = document.getElementById('assembly-label');
+            lbl.textContent = text;
+            lbl.className = `text-[12px] uppercase text-${color}-400 font-bold tracking-[0.2em] block mb-1 opacity-100`;
         }
 
         function closeAssembly() {
             const listPage = document.getElementById('page-list');
             const assemblyPage = document.getElementById('page-assembly');
-            
             assemblyPage.classList.add('page-back-exit');
             listPage.classList.remove('page-back-enter');
-            
             setTimeout(() => {
                 activeTaskId = null;
                 assemblyPage.classList.remove('page-active', 'page-back-exit');
                 assemblyPage.classList.add('page-hidden');
                 fabRestore.classList.remove('visible');
                 closeAllSheets();
+                // Refresh lists
+                fetchTasks();
+                fetchUserActiveTasks();
             }, 500);
         }
 
-        // --- UPDATED START ASSEMBLY LOGIC ---
+        // --- ACTIONS ---
+
         async function startAssembly() {
             const btn = document.getElementById('btn-start-assembly');
             if(!btn) return;
             const originalContent = btn.innerHTML;
-            
-            // Блокируем кнопку
             btn.disabled = true;
             btn.innerHTML = `<span class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> Создание листа...`;
 
             const email = localStorage.getItem('userEmail');
-            if (!email) {
-                alert("Ошибка авторизации. Перезайдите.");
-                return;
-            }
 
             try {
-                // Вызов серверной функции startTask
-                // Она создаст лист (если нет), добавит задачу туда и удалит из общего списка
+                // Action: startTask
                 const response = await fetch(`${SCRIPT_URL}?action=startTask&email=${encodeURIComponent(email)}&taskId=${encodeURIComponent(activeTaskId)}`);
                 const result = await response.json();
 
                 if (result.status === 'Success') {
-                    // Успех -> открываем интерфейс
                     document.getElementById('start-overlay').style.display = 'none';
                     document.getElementById('interactive-area').style.opacity = '1';
                     document.getElementById('interactive-area').style.pointerEvents = 'auto';
                     document.getElementById('action-area').classList.remove('hidden');
+                    // Refresh background lists so it moves from pool to active
+                    fetchTasks();
+                    fetchUserActiveTasks();
                 } else {
-                    // Ошибка (например, задачу уже кто-то взял)
-                    console.error("Start task error:", result);
-                    alert("Не удалось взять задачу. Возможно, она уже занята или удалена.");
+                    alert("Не удалось взять задачу. Она уже занята.");
                     closeAssembly();
                 }
-
             } catch (e) {
-                console.error("Network error on start:", e);
-                alert("Ошибка соединения. Попробуйте снова.");
+                console.error("Start error:", e);
                 btn.disabled = false;
                 btn.innerHTML = originalContent;
-                lucide.createIcons();
             }
         }
 
         function copyCode() {
             const code = document.getElementById('python-code-block').innerText;
-            const el = document.createElement('textarea');
-            el.value = code;
-            document.body.appendChild(el);
-            el.select();
-            document.execCommand('copy');
-            document.body.removeChild(el);
-            document.getElementById('return-code-btn').disabled = false;
+            navigator.clipboard.writeText(code).then(() => {
+                document.getElementById('return-code-btn').disabled = false;
+            });
         }
 
         function handleReturnClick() {
@@ -758,14 +835,22 @@ push_to_main_stream(blocks_data)</pre>
             }
         }
 
+        // UPDATE STAGE TO FINAL
         function handleTableClose() {
             closeAllSheets();
-            hasReachedConfig = true;
+            
+            // UI Transition
             document.getElementById('stage-coding').classList.add('hidden');
             document.getElementById('stage-final').classList.remove('hidden');
             fabRestore.classList.add('visible');
-            document.getElementById('assembly-label').textContent = 'Финальный этап';
-            document.getElementById('assembly-label').className = "text-[12px] uppercase text-purple-400 font-bold tracking-[0.2em] block mb-1 opacity-100";
+            setAssemblyLabel('Финальный этап', 'purple');
+            
+            // Server Update
+            const email = localStorage.getItem('userEmail');
+            if (activeTaskId && email) {
+                fetch(`${SCRIPT_URL}?action=updateStage&email=${encodeURIComponent(email)}&taskId=${encodeURIComponent(activeTaskId)}&stage=FINAL`)
+                .catch(e => console.error("Stage update error:", e));
+            }
         }
 
         function reopenConfigTable() {
@@ -776,17 +861,16 @@ push_to_main_stream(blocks_data)</pre>
         function updateFinalCode() {
             const b1 = document.getElementById('final-block-1').value || '...';
             const b2 = document.getElementById('final-block-2').value || '...';
-            document.getElementById('final-code-entry').textContent = `"${b1}", "${b2}"`;
-            document.getElementById('final-code-entry').classList.remove('italic', 'text-white/50');
-            document.getElementById('final-code-entry').classList.add('text-white');
+            const entry = document.getElementById('final-code-entry');
+            entry.textContent = `"${b1}", "${b2}"`;
+            entry.classList.remove('italic', 'text-white/50');
+            entry.classList.add('text-white');
         }
 
-        // --- UPDATED FINALIZE TASK PROCESS ---
         async function finalizeTaskProcess() {
             const b1 = document.getElementById('final-block-1').value;
             const b2 = document.getElementById('final-block-2').value;
             
-            // Валидация полей
             if (!b1 || !b2) {
                 const btn = document.getElementById('finish-task-btn');
                 btn.classList.add('!bg-red-500');
@@ -794,27 +878,19 @@ push_to_main_stream(blocks_data)</pre>
                 return;
             }
 
-            // Получаем email пользователя
             const email = localStorage.getItem('userEmail');
-            if (!email) {
-                alert("Ошибка: Email не найден. Пожалуйста, перезагрузите страницу.");
-                return;
-            }
-
             const btn = document.getElementById('finish-task-btn');
             btn.disabled = true;
             const originalContent = btn.innerHTML;
             btn.innerHTML = `<span class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> Сохранение...`;
 
             try {
-                // Выполняем запрос на завершение: completeTask + taskId + blocks
                 const response = await fetch(`${SCRIPT_URL}?action=completeTask&email=${encodeURIComponent(email)}&taskId=${encodeURIComponent(activeTaskId)}&block1=${encodeURIComponent(b1)}&block2=${encodeURIComponent(b2)}`);
                 const result = await response.json();
 
                 if (result.status === 'Success') {
                     showNotification('notif-complete');
                     fabRestore.classList.remove('visible');
-                    // Закрываем через секунду
                     setTimeout(() => { closeAssembly(); }, 1000);
                 } else {
                     throw new Error(result.reason || 'Unknown error');
@@ -822,7 +898,7 @@ push_to_main_stream(blocks_data)</pre>
             } catch (err) {
                 console.error("Completion error:", err);
                 btn.disabled = false;
-                btn.innerHTML = `<i data-lucide="alert-circle" class="w-5 h-5"></i> Ошибка. Повторить?`;
+                btn.innerHTML = `<i data-lucide="alert-circle" class="w-5 h-5"></i> Ошибка.`;
                 setTimeout(() => { btn.innerHTML = originalContent; }, 3000);
             }
         }
@@ -842,11 +918,9 @@ push_to_main_stream(blocks_data)</pre>
             lucide.createIcons();
             performBackgroundUpdates(); 
             setInterval(tickTimers, 1000); 
-            setInterval(performBackgroundUpdates, 3000); 
-            setInterval(sortDomElements, 5000);
+            setInterval(performBackgroundUpdates, 4000); 
         }
 
-        // --- ENTRY POINT ---
         window.onload = function() {
             checkUserAuthorization(false);
         };

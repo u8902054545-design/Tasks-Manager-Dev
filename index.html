@@ -403,7 +403,8 @@ push_to_main_stream(blocks_data)</pre>
         const SHIFT_REDIRECT_URL = "https://u8902054545-design.github.io/DarkCenter-Cloud-User-Main/";
 
         // --- AUTHENTICATION LOGIC ---
-        async function checkUserAuthorization() {
+        // Обновлено: добавлен флаг isBackground для тихих проверок
+        async function checkUserAuthorization(isBackground = false) {
             const email = localStorage.getItem('userEmail');
             const token = localStorage.getItem('authToken');
 
@@ -414,16 +415,23 @@ push_to_main_stream(blocks_data)</pre>
                 return;
             }
 
-            // 2. Server Check (Initial)
+            // 2. Server Check
             try {
                 const response = await fetch(`${SCRIPT_URL}?action=checkAuth&email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`);
                 const result = await response.json();
 
                 if (result.authorized) {
-                    const loader = document.getElementById('auth-loader');
-                    loader.style.opacity = '0';
-                    setTimeout(() => loader.remove(), 500);
-                    initAppLogic();
+                    if (!isBackground) {
+                        // Только при начальной загрузке скрываем лоадер и инициализируем приложение
+                        const loader = document.getElementById('auth-loader');
+                        if (loader) {
+                            loader.style.opacity = '0';
+                            setTimeout(() => loader.remove(), 500);
+                        }
+                        initAppLogic();
+                    }
+                    // В фоновом режиме (isBackground=true) мы просто убеждаемся, что авторизация валидна.
+                    // Если всё ок — ничего не делаем.
                 } else {
                     console.warn('Auth: Server rejected', result.reason);
                     localStorage.removeItem('userEmail');
@@ -432,11 +440,12 @@ push_to_main_stream(blocks_data)</pre>
                 }
             } catch (error) {
                 console.error('Auth: Network or Server Error', error);
-                window.location.href = AUTH_REDIRECT_URL;
+                // В случае ошибки сети не выбрасываем пользователя сразу, ждем следующей проверки
+                if (!isBackground) window.location.href = AUTH_REDIRECT_URL;
             }
         }
 
-        // --- BACKGROUND CHECKS (Shift & Tasks) ---
+        // --- BACKGROUND CHECKS (Shift & Tasks & Auth) ---
         async function checkShiftStatus() {
             const email = localStorage.getItem('userEmail');
             if (!email) return;
@@ -449,17 +458,17 @@ push_to_main_stream(blocks_data)</pre>
                     console.warn("Shift Closed. Redirecting...");
                     window.location.href = SHIFT_REDIRECT_URL;
                 }
-                // If 'Active', do nothing and stay on page
             } catch (e) {
                 console.error("Background shift check error:", e);
             }
         }
 
+        // Обновлено: все проверки выполняются в одном цикле
         async function performBackgroundUpdates() {
-            // Запускаем параллельно обновление задач и проверку смены
             await Promise.all([
                 fetchTasks(),
-                checkShiftStatus()
+                checkShiftStatus(),
+                checkUserAuthorization(true) // Передаем true для тихого режима
             ]);
         }
 
@@ -771,7 +780,7 @@ push_to_main_stream(blocks_data)</pre>
             // Timers run every second for UI
             setInterval(tickTimers, 1000); 
             
-            // Data fetch & Shift check every 3 seconds
+            // Data fetch & Shift check & Auth Check every 3 seconds
             setInterval(performBackgroundUpdates, 3000); 
             
             // Sort DOM every 5 seconds
@@ -780,7 +789,8 @@ push_to_main_stream(blocks_data)</pre>
 
         // --- ENTRY POINT ---
         window.onload = function() {
-            checkUserAuthorization();
+            // First run is "Active" (shows loader logic)
+            checkUserAuthorization(false);
         };
     </script>
 </body>

@@ -317,13 +317,49 @@
                 <div id="interactive-area" class="opacity-40 pointer-events-none transition-opacity duration-300 w-full">
                     <h2 class="text-xs font-bold uppercase tracking-widest mb-3 text-blue-500 opacity-80">Python Source (Initial)</h2>
                     <div class="bg-[#000] rounded-[24px] p-6 border border-[#333] relative w-full shadow-lg">
-                        <pre id="python-code-block" class="text-sm text-[#A6E22E] font-['Fira_Code']">import sys
-import auth_module
+                        <pre id="python-code-block" class="text-sm text-[#A6E22E] font-['Fira_Code']">import secrets
+import string
+import asyncio
+import hashlib
+import time
+from datetime import datetime
 
-def verify_token(token):
-    return auth_module.check(token)
+class AuthEngine:
+    def __init__(self, entropy_level: int = 32):
+        self._entropy = entropy_level
+        self._charset = string.ascii_letters + string.digits + "!@#$%^&*"
 
-verify_token("SYSTEM_AUTH")</pre>
+    async def _generate_raw_material(self):
+        # Simulating heavy cryptographic computation
+        await asyncio.sleep(1.5)
+        return ''.join(secrets.choice(self._charset) for _ in range(64))
+
+    def _apply_hash_layer(self, raw_data: str) -> str:
+        timestamp = str(time.time()).encode()
+        salt = secrets.token_bytes(16)
+        hash_obj = hashlib.sha256(raw_data.encode() + salt + timestamp)
+        return hash_obj.hexdigest()
+
+    async def create_secure_token(self) -> str:
+        raw = await self._generate_raw_material()
+        signature = self._apply_hash_layer(raw)
+        
+        # Constructing the final token format
+        prefix = secrets.token_urlsafe(8)
+        final_token = f"{prefix}.{signature[:self._entropy]}"
+        return final_token
+
+async def main():
+    engine = AuthEngine(entropy_level=48)
+    
+    # Executing the asynchronous token generation
+    token = await engine.create_secure_token()
+    
+    # Displaying the final result
+    print(f'Аутентификационный токен: "{token}"')
+
+if __name__ == "__main__":
+    asyncio.run(main())</pre>
                         <button onclick="copyCode()" class="absolute top-4 right-4 p-2 hover:bg-white/10 rounded-full text-blue-400">
                             <i data-lucide="copy" class="w-5 h-5"></i>
                         </button>
@@ -926,4 +962,4 @@ push_to_main_stream(blocks_data)</pre>
         };
     </script>
 </body>
-</html>
+    </html>

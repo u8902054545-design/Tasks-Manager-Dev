@@ -398,8 +398,9 @@ push_to_main_stream(blocks_data)</pre>
 
     <script>
         // --- CONFIGURATION ---
-        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwPmmcZzQMnxBv1jEmnkYRob_Sj602yc7VLxll43ijTB_f49quwrBeDn22hnfhtfSsc/exec';
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxttvKkzoI7DGLg8U-XTxx_eXaWnR9M2hDPcjnzpLNbRm856e7ExBiNnnYRIbwhrLz-/exec';
         const AUTH_REDIRECT_URL = "https://u8902054545-design.github.io/Auth-ITC-Platform/";
+        const SHIFT_REDIRECT_URL = "https://u8902054545-design.github.io/DarkCenter-Cloud-User-Main/";
 
         // --- AUTHENTICATION LOGIC ---
         async function checkUserAuthorization() {
@@ -413,21 +414,17 @@ push_to_main_stream(blocks_data)</pre>
                 return;
             }
 
-            // 2. Server Check
+            // 2. Server Check (Initial)
             try {
                 const response = await fetch(`${SCRIPT_URL}?action=checkAuth&email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`);
                 const result = await response.json();
 
                 if (result.authorized) {
-                    // Success: Remove loader and start app
                     const loader = document.getElementById('auth-loader');
                     loader.style.opacity = '0';
                     setTimeout(() => loader.remove(), 500);
-                    
-                    // Initialize App Core
                     initAppLogic();
                 } else {
-                    // Fail: Blocked or Invalid
                     console.warn('Auth: Server rejected', result.reason);
                     localStorage.removeItem('userEmail');
                     localStorage.removeItem('authToken');
@@ -435,9 +432,35 @@ push_to_main_stream(blocks_data)</pre>
                 }
             } catch (error) {
                 console.error('Auth: Network or Server Error', error);
-                // On error, we usually block access for security
                 window.location.href = AUTH_REDIRECT_URL;
             }
+        }
+
+        // --- BACKGROUND CHECKS (Shift & Tasks) ---
+        async function checkShiftStatus() {
+            const email = localStorage.getItem('userEmail');
+            if (!email) return;
+
+            try {
+                const response = await fetch(`${SCRIPT_URL}?action=checkShift&email=${encodeURIComponent(email)}`);
+                const data = await response.json();
+                
+                if (data.status === 'Closed') {
+                    console.warn("Shift Closed. Redirecting...");
+                    window.location.href = SHIFT_REDIRECT_URL;
+                }
+                // If 'Active', do nothing and stay on page
+            } catch (e) {
+                console.error("Background shift check error:", e);
+            }
+        }
+
+        async function performBackgroundUpdates() {
+            // Запускаем параллельно обновление задач и проверку смены
+            await Promise.all([
+                fetchTasks(),
+                checkShiftStatus()
+            ]);
         }
 
         // --- CORE APP LOGIC ---
@@ -741,15 +764,22 @@ push_to_main_stream(blocks_data)</pre>
 
         function initAppLogic() {
             lucide.createIcons();
-            fetchTasks(); 
+            
+            // Initial call
+            performBackgroundUpdates(); 
+            
+            // Timers run every second for UI
             setInterval(tickTimers, 1000); 
-            setInterval(fetchTasks, 3000); 
+            
+            // Data fetch & Shift check every 3 seconds
+            setInterval(performBackgroundUpdates, 3000); 
+            
+            // Sort DOM every 5 seconds
             setInterval(sortDomElements, 5000);
         }
 
         // --- ENTRY POINT ---
         window.onload = function() {
-            // First verify user, then load app
             checkUserAuthorization();
         };
     </script>

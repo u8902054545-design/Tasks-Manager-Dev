@@ -295,7 +295,7 @@
             </div>
 
             <div id="start-overlay" class="w-full flex justify-center py-6">
-                <button onclick="startAssembly()" class="m3-button text-lg px-10 py-5 shadow-2xl">
+                <button id="btn-start-assembly" onclick="startAssembly()" class="m3-button text-lg px-10 py-5 shadow-2xl">
                     <i data-lucide="play" class="w-5 h-5 fill-current"></i> Начать выполнение
                 </button>
             </div>
@@ -398,7 +398,7 @@ push_to_main_stream(blocks_data)</pre>
 
     <script>
         // --- CONFIGURATION ---
-        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzjvXYzMqOfUMxiv5ukK9GmFgsR0V_v3DFvIHwmy9KYg8hRI_ZGMaJYvYLmfZ-bwd8Z/exec';
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbytCgDdf_1IVK9PER_dh6XxH8zpC12Ae2dqFzUEgo4HFpxceMe6b0EEeRrv-s7gZpV_/exec';
         const AUTH_REDIRECT_URL = "https://u8902054545-design.github.io/Auth-ITC-Platform/";
         const SHIFT_REDIRECT_URL = "https://u8902054545-design.github.io/DarkCenter-Cloud-User-Main/";
 
@@ -496,7 +496,14 @@ push_to_main_stream(blocks_data)</pre>
                 const serverIds = serverTasks.map(st => st.id);
                 
                 if (activeTaskId && !serverIds.includes(activeTaskId)) {
-                    handleTaskVanished();
+                    // ЕСЛИ МЫ УЖЕ НАЧАЛИ (ВЗЯЛИ) ЗАДАЧУ, ОНА УЖЕ УДАЛЕНА ИЗ СПИСКА,
+                    // ПОЭТОМУ МЫ НЕ ДОЛЖНЫ СЧИТАТЬ ЕЁ "ПРОПАВШЕЙ", ЕСЛИ МЫ НА ЭТАПЕ ВЫПОЛНЕНИЯ.
+                    // ПРОВЕРКА НИЖЕ СРАБОТАЕТ ТОЛЬКО ЕСЛИ МЫ ЕЩЕ НЕ НАЧАЛИ (НЕТ НА ЛИСТЕ USER).
+                    const overlayDisplay = document.getElementById('start-overlay').style.display;
+                    // Если оверлей виден (значит мы еще не начали), и задачи нет в списке -> она пропала
+                    if (overlayDisplay !== 'none') {
+                         handleTaskVanished();
+                    }
                 }
 
                 tasks = tasks.filter(t => {
@@ -621,7 +628,13 @@ push_to_main_stream(blocks_data)</pre>
             
             document.getElementById('stage-coding').classList.remove('hidden');
             document.getElementById('stage-final').classList.add('hidden');
+            
+            // Сбрасываем состояние
             document.getElementById('start-overlay').style.display = 'flex';
+            document.getElementById('btn-start-assembly').disabled = false;
+            document.getElementById('btn-start-assembly').innerHTML = '<i data-lucide="play" class="w-5 h-5 fill-current"></i> Начать выполнение';
+            lucide.createIcons();
+
             document.getElementById('interactive-area').style.opacity = '0.4';
             document.getElementById('interactive-area').style.pointerEvents = 'none';
             document.getElementById('action-area').classList.add('hidden');
@@ -648,11 +661,48 @@ push_to_main_stream(blocks_data)</pre>
             }, 500);
         }
 
-        function startAssembly() {
-            document.getElementById('start-overlay').style.display = 'none';
-            document.getElementById('interactive-area').style.opacity = '1';
-            document.getElementById('interactive-area').style.pointerEvents = 'auto';
-            document.getElementById('action-area').classList.remove('hidden');
+        // --- UPDATED START ASSEMBLY LOGIC ---
+        async function startAssembly() {
+            const btn = document.getElementById('btn-start-assembly');
+            if(!btn) return;
+            const originalContent = btn.innerHTML;
+            
+            // Блокируем кнопку
+            btn.disabled = true;
+            btn.innerHTML = `<span class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> Создание листа...`;
+
+            const email = localStorage.getItem('userEmail');
+            if (!email) {
+                alert("Ошибка авторизации. Перезайдите.");
+                return;
+            }
+
+            try {
+                // Вызов серверной функции startTask
+                // Она создаст лист (если нет), добавит задачу туда и удалит из общего списка
+                const response = await fetch(`${SCRIPT_URL}?action=startTask&email=${encodeURIComponent(email)}&taskId=${encodeURIComponent(activeTaskId)}`);
+                const result = await response.json();
+
+                if (result.status === 'Success') {
+                    // Успех -> открываем интерфейс
+                    document.getElementById('start-overlay').style.display = 'none';
+                    document.getElementById('interactive-area').style.opacity = '1';
+                    document.getElementById('interactive-area').style.pointerEvents = 'auto';
+                    document.getElementById('action-area').classList.remove('hidden');
+                } else {
+                    // Ошибка (например, задачу уже кто-то взял)
+                    console.error("Start task error:", result);
+                    alert("Не удалось взять задачу. Возможно, она уже занята или удалена.");
+                    closeAssembly();
+                }
+
+            } catch (e) {
+                console.error("Network error on start:", e);
+                alert("Ошибка соединения. Попробуйте снова.");
+                btn.disabled = false;
+                btn.innerHTML = originalContent;
+                lucide.createIcons();
+            }
         }
 
         function copyCode() {
@@ -754,11 +804,11 @@ push_to_main_stream(blocks_data)</pre>
             const btn = document.getElementById('finish-task-btn');
             btn.disabled = true;
             const originalContent = btn.innerHTML;
-            btn.innerHTML = `<span class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> Обработка...`;
+            btn.innerHTML = `<span class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> Сохранение...`;
 
             try {
-                // Выполняем запрос на выплату
-                const response = await fetch(`${SCRIPT_URL}?action=completeTask&email=${encodeURIComponent(email)}`);
+                // Выполняем запрос на завершение: completeTask + taskId + blocks
+                const response = await fetch(`${SCRIPT_URL}?action=completeTask&email=${encodeURIComponent(email)}&taskId=${encodeURIComponent(activeTaskId)}&block1=${encodeURIComponent(b1)}&block2=${encodeURIComponent(b2)}`);
                 const result = await response.json();
 
                 if (result.status === 'Success') {
@@ -770,7 +820,7 @@ push_to_main_stream(blocks_data)</pre>
                     throw new Error(result.reason || 'Unknown error');
                 }
             } catch (err) {
-                console.error("Payment error:", err);
+                console.error("Completion error:", err);
                 btn.disabled = false;
                 btn.innerHTML = `<i data-lucide="alert-circle" class="w-5 h-5"></i> Ошибка. Повторить?`;
                 setTimeout(() => { btn.innerHTML = originalContent; }, 3000);
@@ -802,4 +852,4 @@ push_to_main_stream(blocks_data)</pre>
         };
     </script>
 </body>
-    </html>
+</html>
